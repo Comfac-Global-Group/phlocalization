@@ -1,0 +1,48 @@
+name: Review suggestions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop, development, main, master]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review-and-generate-suggestions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Generate code and test-case review
+        id: review_job
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLOUD_FUNCTION_URL: ${{ secrets.CLOUD_FUNCTION_URL }}
+          FUNCTION_API_KEY: ${{ secrets.FUNCTION_API_KEY }}
+        run: |
+          python .github/scripts/review.py > review.md
+          echo "REVIEW<<EOF" >> $GITHUB_OUTPUT
+          cat review.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create PR comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.review_job.outputs.REVIEW }}
+          token: ${{ secrets.GITHUB_TOKEN }}

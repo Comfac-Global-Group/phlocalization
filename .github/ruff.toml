@@ -1,0 +1,25 @@
+
+line-length = 110
+target-version = "py310"
+exclude = ["node_modules", ".git", "env", "venv"]
+
+[lint]
+select = [
+    "F",
+    "E",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "RUF",
+]
+ignore = [
+    "W191", # indentation contains tabs
+    "RUF001", # string contains ambiguous unicode character
+    "E101", # indentation contains mixed spaces and tabs
+]
+
+[format]
+quote-style = "double"
+indent-style = "tab"
+docstring-code-format = true

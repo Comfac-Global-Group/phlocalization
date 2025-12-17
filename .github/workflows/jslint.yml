@@ -1,0 +1,36 @@
+name: JavaScript Lint Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop, development, main, master]
+
+jobs:
+  js-lint:
+    name: JavaScript Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Prettier
+        run: npm install -g prettier
+
+      - name: Run Prettier (JS Linting)
+        run: |
+          FILES=$(find . -type f \( -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.vue" -o -name "*.css" -o -name "*.html" -o -name "*.json" \))
+          if [ -n "$FILES" ]; then
+            echo "$FILES" | xargs prettier --log-level debug --write
+          else
+            echo "No matching files found for linting."
+          fi
+
+      - name: Fail on Lint Errors
+        if: failure()
+        run: exit 1

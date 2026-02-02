@@ -74,10 +74,17 @@ def execute(filters=None):
 
 	message, opening_balance = check_opening_balance(asset, liability, equity)
 
-	accounts = frappe.get_all(
-		"Account",
-		fields=["name", "parent_account", "schedule"],
-	)
+	try:
+		accounts = frappe.get_all(
+			"Account",
+			fields=["name", "parent_account", "schedule"],
+		)
+	except Exception:
+		frappe.log_error(
+			frappe.get_traceback(),
+			"Account Fetch Failed in Balance Sheet Schedule"
+		)
+		accounts = []
 
 	parent_map = {a.name: a.parent_account for a in accounts}
 	schedule_map = {a.name: a.schedule for a in accounts if a.schedule}
@@ -90,7 +97,7 @@ def execute(filters=None):
 		Caches results to avoid repeated lookups during report execution.
 		"""
 		if not account:
-			return None
+			return ""
 		if account in _effective_schedule_cache:
 			return _effective_schedule_cache[account]
 
@@ -99,22 +106,25 @@ def execute(filters=None):
 
 		while cur and cur not in seen:
 			seen.add(cur)
-			if schedule_map.get(cur):
-				_effective_schedule_cache[account] = schedule_map[cur]
-				return schedule_map[cur]
+			schedule = schedule_map.get(cur)
+			if schedule:
+				_effective_schedule_cache[account] = schedule
+				return schedule
 			cur = parent_map.get(cur)
 
-		_effective_schedule_cache[account] = None
-		return None
+		_effective_schedule_cache[account] = ""
+		return ""
 
 	data = []
-	data.extend(asset or [])
-	data.extend(liability or [])
-	data.extend(equity or [])
+	data.extend(asset)
+	data.extend(liability)
+	data.extend(equity)
+
 	if opening_balance and round(opening_balance, 2) != 0:
 		unclosed = {
-			"account_name": "'" + _("Unclosed Fiscal Years Profit / Loss (Credit)") + "'",
-			"account": "'" + _("Unclosed Fiscal Years Profit / Loss (Credit)") + "'",
+			"account_name": _("Unclosed Fiscal Years Profit / Loss (Credit)"),
+			"account": None,
+			"is_synthetic": True,
 			"warn_if_negative": True,
 			"currency": currency,
 		}
@@ -136,7 +146,7 @@ def execute(filters=None):
 	value_fields.add("total")
 
 	final_data = []
-	current_schedule = None
+	current_schedule = ""
 	schedule_total = {}
 
 	def flush_schedule_total():
@@ -151,7 +161,6 @@ def execute(filters=None):
 		}
 		for key in value_fields:
 			row[key] = schedule_total.get(key)
-
 		final_data.append(row)
 
 	for row in data:
@@ -159,9 +168,9 @@ def execute(filters=None):
 			continue
 		account = row.get("account")
 
-		if not account or account.startswith("'"):
+		if not account:
 			flush_schedule_total()
-			current_schedule = None
+			current_schedule = ""
 			schedule_total = {}
 			row_copy = row.copy()
 			row_copy["schedule"] = ""
@@ -189,15 +198,12 @@ def execute(filters=None):
 					"indent": 0,
 					"is_group": 1,
 				}
-
 				for key in value_fields:
 					header_row[key] = None
-
 				final_data.append(header_row)
 
 			current_schedule = schedule
 			schedule_total = {}
-
 
 		row_copy = row.copy()
 		row_copy["schedule"] = ""
@@ -205,8 +211,9 @@ def execute(filters=None):
 		final_data.append(row_copy)
 
 		for key in value_fields:
-			if isinstance(row_copy.get(key), (int, float)):
-				schedule_total[key] = schedule_total.get(key, 0) + row_copy[key]
+			val = row_copy.get(key)
+			if isinstance(val, (int, float)):
+				schedule_total[key] = schedule_total.get(key, 0) + val
 
 	flush_schedule_total()
 
@@ -259,6 +266,13 @@ def get_provisional_profit_loss(
 				effective_liability += flt(equity[-2].get(key))
 
 			provisional_profit_loss[key] = total_assets - effective_liability
+			total_row[key] = provisional_profit_loss[key] + effective_liability
+
+			total += flt(provisional_profit_loss[key])
+			provisional_profit_loss["total"] = total
+
+			total_row_total += flt(total_row[key])
+			total_row["total"] = total_row_total
 
 			provisional_profit_loss.update(
 				{
@@ -268,14 +282,6 @@ def get_provisional_profit_loss(
 					"total": total,
 				}
 			)
-
-			total_row[key] = provisional_profit_loss[key] + effective_liability
-
-			total += flt(provisional_profit_loss[key])
-			provisional_profit_loss["total"] = total
-
-			total_row_total += flt(total_row[key])
-			total_row["total"] = total_row_total
 
 	return provisional_profit_loss, total_row
 

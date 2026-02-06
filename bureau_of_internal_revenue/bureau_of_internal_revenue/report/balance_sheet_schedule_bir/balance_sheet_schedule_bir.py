@@ -74,31 +74,62 @@ def execute(filters=None):
 
 	message, opening_balance = check_opening_balance(asset, liability, equity)
 
-	account_schedules = {
-		d.name: d.schedule
-		for d in frappe.get_all(
+	try:
+		accounts = frappe.get_all(
 			"Account",
-			fields=["name", "schedule"],
-			filters={"schedule": ["!=", ""]},
+			fields=["name", "parent_account", "schedule"],
 		)
-	}
+	except Exception:
+		frappe.log_error(
+			frappe.get_traceback(),
+			"Account Fetch Failed in Balance Sheet Schedule"
+		)
+		accounts = []
+
+	parent_map = {a.name: a.parent_account for a in accounts}
+	schedule_map = {a.name: a.schedule for a in accounts if a.schedule}
+
+	_effective_schedule_cache = {}
+
+	def get_effective_schedule(account):
+		"""
+		Returns the Schedule assigned to an account or inherited from its parent hierarchy.
+		Caches results to avoid repeated lookups during report execution.
+		"""
+		if not account:
+			return ""
+		if account in _effective_schedule_cache:
+			return _effective_schedule_cache[account]
+
+		cur = account
+		seen = set()
+
+		while cur and cur not in seen:
+			seen.add(cur)
+			schedule = schedule_map.get(cur)
+			if schedule:
+				_effective_schedule_cache[account] = schedule
+				return schedule
+			cur = parent_map.get(cur)
+
+		_effective_schedule_cache[account] = ""
+		return ""
 
 	data = []
-	data.extend(asset or [])
-	data.extend(liability or [])
-	data.extend(equity or [])
+	data.extend(asset)
+	data.extend(liability)
+	data.extend(equity)
+
 	if opening_balance and round(opening_balance, 2) != 0:
 		unclosed = {
-			"account_name": "'" + _("Unclosed Fiscal Years Profit / Loss (Credit)") + "'",
-			"account": "'" + _("Unclosed Fiscal Years Profit / Loss (Credit)") + "'",
+			"account_name": _("Unclosed Fiscal Years Profit / Loss (Credit)"),
+			"account": None,
+			"is_synthetic": True,
 			"warn_if_negative": True,
 			"currency": currency,
 		}
 		for period in period_list:
 			unclosed[period.key] = opening_balance
-			if provisional_profit_loss:
-				provisional_profit_loss[period.key] = provisional_profit_loss[period.key] - opening_balance
-
 		unclosed["total"] = opening_balance
 		data.append(unclosed)
 
@@ -115,7 +146,7 @@ def execute(filters=None):
 	value_fields.add("total")
 
 	final_data = []
-	current_schedule = None
+	current_schedule = ""
 	schedule_total = {}
 
 	def flush_schedule_total():
@@ -128,46 +159,61 @@ def execute(filters=None):
 			"indent": 1,
 			"is_group": 1,
 		}
-		for k, v in schedule_total.items():
-			row[k] = v
+		for key in value_fields:
+			row[key] = schedule_total.get(key)
 		final_data.append(row)
 
 	for row in data:
-		if row.get("is_group") and not row.get("parent_account"):
+		if row.get("is_group"):
 			continue
-		
 		account = row.get("account")
-		schedule = account_schedules.get(account)
-		is_group = row.get("is_group")
 
-		if is_group and schedule:
+		if not account:
+			flush_schedule_total()
+			current_schedule = ""
+			schedule_total = {}
+			row_copy = row.copy()
+			row_copy["schedule"] = ""
+
+			has_value = False
+			for key in value_fields:
+				val = row_copy.get(key)
+				if isinstance(val, (int, float)) and val != 0:
+					has_value = True
+					break
+
+			if has_value:
+				final_data.append(row_copy)
+			continue
+
+		schedule = get_effective_schedule(account)
+
+		if schedule != current_schedule:
 			flush_schedule_total()
 
-			final_data.append({
-				"schedule": schedule,
-				"account_name": row.get("account_name"),
-				"indent": 0,
-				"is_group": 1,
-			})
+			if schedule:
+				header_row = {
+					"schedule": schedule,
+					"account_name": schedule,
+					"indent": 0,
+					"is_group": 1,
+				}
+				for key in value_fields:
+					header_row[key] = None
+				final_data.append(header_row)
 
 			current_schedule = schedule
 			schedule_total = {}
-			continue
 
-		if current_schedule and not is_group:
-			row_copy = row.copy()
-			row_copy["schedule"] = ""
-			final_data.append(row_copy)
+		row_copy = row.copy()
+		row_copy["schedule"] = ""
+		row_copy["indent"] = 1
+		final_data.append(row_copy)
 
-			for key in value_fields:
-				if isinstance(row_copy.get(key), (int, float)):
-					schedule_total[key] = schedule_total.get(key, 0) + row_copy[key]
-			continue
-
-		flush_schedule_total()
-		current_schedule = None
-		schedule_total = {}
-		final_data.append(row)
+		for key in value_fields:
+			val = row_copy.get(key)
+			if isinstance(val, (int, float)):
+				schedule_total[key] = schedule_total.get(key, 0) + val
 
 	flush_schedule_total()
 
@@ -208,12 +254,11 @@ def get_provisional_profit_loss(
 			"warn_if_negative": True,
 			"currency": currency,
 		}
-		has_value = False
 
 		for period in period_list:
-			key = period if consolidated else period.key
+			key = period.key
 			total_assets = flt(asset[-2].get(key))
-			effective_liability = 0.00
+			effective_liability = 0
 
 			if liability and liability[-1] == {}:
 				effective_liability += flt(liability[-2].get(key))
@@ -223,22 +268,18 @@ def get_provisional_profit_loss(
 			provisional_profit_loss[key] = total_assets - effective_liability
 			total_row[key] = provisional_profit_loss[key] + effective_liability
 
-			if provisional_profit_loss[key]:
-				has_value = True
-
 			total += flt(provisional_profit_loss[key])
 			provisional_profit_loss["total"] = total
 
 			total_row_total += flt(total_row[key])
 			total_row["total"] = total_row_total
 
-		if has_value:
 			provisional_profit_loss.update(
 				{
 					"account_name": "'" + _("Provisional Profit / Loss (Credit)") + "'",
 					"account": "'" + _("Provisional Profit / Loss (Credit)") + "'",
-					"warn_if_negative": True,
 					"currency": currency,
+					"total": total,
 				}
 			)
 
@@ -288,7 +329,7 @@ def get_report_summary(
 		period_list = get_filtered_list_for_consolidated_report(filters, period_list)
 
 	for period in period_list:
-		key = period if consolidated else period.key
+		key = period.key
 		if asset:
 			net_asset += asset[-2].get(key)
 		if liability and liability[-1] == {}:
@@ -296,7 +337,7 @@ def get_report_summary(
 		if equity and equity[-1] == {}:
 			net_equity += equity[-2].get(key)
 		if provisional_profit_loss:
-			net_provisional_profit_loss += provisional_profit_loss.get(key)
+			net_provisional_profit_loss += provisional_profit_loss.get(key, 0)
 
 	return [
 		{"value": net_asset, "label": _("Total Asset"), "datatype": "Currency", "currency": currency},

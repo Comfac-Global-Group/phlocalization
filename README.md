@@ -1,4 +1,18 @@
-# Bureau of Internal Revenue (BIR)
+# Comfac Philippine Localization (CPL)
+
+> **Built on the Frappe Framework | A BetterGov.ph Civic Tech Initiative**
+
+A free, open-source Frappe/ERPNext localization for Philippine statutory compliance, workforce management, retail operations, and sustainability tracking.
+
+| | |
+|---|---|
+| **Roadmap** | [Wiki](https://github.com/xunema/phlocalization/wiki/Roadmap) · [`docs/Roadmap.md`](docs/Roadmap.md) |
+| **Wiki** | [https://github.com/xunema/phlocalization/wiki](https://github.com/xunema/phlocalization/wiki) |
+| **PRD** | [`docs/Project Requirements Document.md`](docs/Project%20Requirements%20Document.md) |
+
+---
+
+## Current Module: Bureau of Internal Revenue (BIR)
 
 A custom **Frappe application** developed by **Ambibuzz Technologies LLP** that replicates and extends standard ERPNext financial reports to support **Bureau of Internal Revenue (BIR)**– Philippines(PHP) style statutory reporting and presentation requirements.
 
@@ -59,3 +73,4 @@ From your bench directory:
 
 ```bash
 bench get-app bureau_of_internal_revenue https://github.com/Ambibuzz/bureau_of_internal_revenue.git
+```

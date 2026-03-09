@@ -1,9 +1,9 @@
 [project]
-name = "your_app_name"
+name = "comfacPHerpnextLocalization"
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Ambibuzz Technologies LLP", email = "buzz.us@ambibuzz.com" }
 ]
-description = "Your app description"
+description = "Comfac Philippine Localization — BIR statutory compliance for ERPNext"
 requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]

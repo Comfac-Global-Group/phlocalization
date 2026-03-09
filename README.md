@@ -9,6 +9,8 @@ A free, open-source Frappe/ERPNext localization for Philippine statutory complia
 | **Roadmap** | [Wiki](https://github.com/xunema/phlocalization/wiki/Roadmap) · [`docs/Roadmap.md`](docs/Roadmap.md) |
 | **Wiki** | [https://github.com/xunema/phlocalization/wiki](https://github.com/xunema/phlocalization/wiki) |
 | **PRD** | [`docs/Project Requirements Document.md`](docs/Project%20Requirements%20Document.md) |
+| **Architecture** | [`docs/Architecture and Structure.md`](docs/Architecture%20and%20Structure.md) |
+| **Dev Skill Guide** | [`docs/phloc-skill.md`](docs/phloc-skill.md) |
 
 ---
 
@@ -72,5 +74,5 @@ A replicated version of ERPNext’s standard **Balance Sheet** report with addit
 From your bench directory:
 
 ```bash
-bench get-app bureau_of_internal_revenue https://github.com/Ambibuzz/bureau_of_internal_revenue.git
+bench get-app https://github.com/xunema/phlocalization
 ```

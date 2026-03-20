@@ -43,18 +43,18 @@ def get_columns():
 		{"label": "Earliest SO", "fieldname": "earliest_so", "fieldtype": "Link", "options": "Sales Order", "width": 160},
 		{"label": "Estimated Start Date", "fieldname": "expected_start_date", "fieldtype": "Date", "width": 110},
 
-		{"label": "Total SI Items (Base)", "fieldname": "si_total", "fieldtype": "Currency", "width": 180},
-		{"label": "Total Purchase Invoices", "fieldname": "pi_total", "fieldtype": "Currency", "width": 170},
-		{"label": "Project MR (from Stores)", "fieldname": "mr_amount", "fieldtype": "Currency", "width": 160},
-		{"label": "Project MRS (to Stores)", "fieldname": "mrs_amount", "fieldtype": "Currency", "width": 160},
-		{"label": "Timesheets Costing", "fieldname": "ts_amount", "fieldtype": "Currency", "width": 180},
-		{"label": "Expense Claims", "fieldname": "ec_amount", "fieldtype": "Currency", "width": 160},
+		{"label": "Total SI Items (Base)", "fieldname": "si_total", "fieldtype": "Currency", "options": "currency", "width": 180},
+		{"label": "Total Purchase Invoices", "fieldname": "pi_total", "fieldtype": "Currency", "options": "currency", "width": 170},
+		{"label": "Project MR (from Stores)", "fieldname": "mr_amount", "fieldtype": "Currency", "options": "currency", "width": 160},
+		{"label": "Project MRS (to Stores)", "fieldname": "mrs_amount", "fieldtype": "Currency", "options": "currency", "width": 160},
+		{"label": "Timesheets Costing", "fieldname": "ts_amount", "fieldtype": "Currency", "options": "currency", "width": 180},
+		{"label": "Expense Claims", "fieldname": "ec_amount", "fieldtype": "Currency", "options": "currency", "width": 160},
 
 		{"label": "Purchase Invoice Remarks", "fieldname": "pi_remarks", "fieldtype": "HTML", "width": 300},
 		{"label": "Journal Entry Remarks", "fieldname": "je_remarks", "fieldtype": "HTML", "width": 300},
 
-		{"label": "JO Total", "fieldname": "jo_total", "fieldtype": "Currency", "width": 170},
-		{"label": "Remainder", "fieldname": "remainder", "fieldtype": "Currency", "width": 160},
+		{"label": "JO Total", "fieldname": "jo_total", "fieldtype": "Currency", "options": "currency", "width": 170},
+		{"label": "Remainder", "fieldname": "remainder", "fieldtype": "Currency", "options": "currency", "width": 160},
 
 		{"label": "Sales Order Items", "fieldname": "so_items", "fieldtype": "Data", "width": 300},
 	]
@@ -74,6 +74,8 @@ def get_data(filters):
 	p.customer AS customer,
 	e.so_name AS earliest_so,
 	p.expected_start_date AS expected_start_date,
+
+	comp.default_currency AS currency,
 
 	COALESCE(si.si_items_total_base, 0) AS si_total,
 	COALESCE(pt.pi_total, 0) AS pi_total,
@@ -104,6 +106,8 @@ def get_data(filters):
 	) AS so_items
 
 	FROM `tabProject` p
+
+	LEFT JOIN `tabCompany` comp ON comp.name = p.company
 
 	/* Earliest SO per project - header-level project link only (soi.project does not exist) */
 	LEFT JOIN (

@@ -21,7 +21,7 @@ def execute(filters=None):
 	if filters.get("from_date") > filters.get("to_date"):
 		frappe.throw("From Date cannot be greater than To Date")
 
-	project = filters.get("project", "")
+	project = filters.get("project_like", "")
 	filters["project_like"] = f"%{project}%" if project else ""
 
 	columns = get_columns()

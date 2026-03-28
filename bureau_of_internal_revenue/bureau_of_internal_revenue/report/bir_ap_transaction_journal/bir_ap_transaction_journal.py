@@ -55,8 +55,8 @@ def get_columns():
 		{"label": "Account", "fieldname": "account", "fieldtype": "Data", "width": 280},
 		{"label": "Cost Center", "fieldname": "cost_center", "fieldtype": "Link", "options": "Cost Center", "width": 150},
 		{"label": "Description", "fieldname": "description", "fieldtype": "Data", "width": 300},
-		{"label": "Debit", "fieldname": "debit", "fieldtype": "Currency", "width": 120},
-		{"label": "Credit", "fieldname": "credit", "fieldtype": "Currency", "width": 120},
+		{"label": "Debit", "fieldname": "debit", "fieldtype": "Currency","options": "currency", "width": 120},
+		{"label": "Credit", "fieldname": "credit", "fieldtype": "Currency", "options": "currency", "width": 120},
 		{"label": "Project", "fieldname": "project", "fieldtype": "Link", "options": "Project", "width": 140},
 		{"label": "TIN Number", "fieldname": "tin_number", "fieldtype": "Data", "width": 150},
 	]
@@ -96,13 +96,14 @@ def get_data(filters):
 		debit ,
 		credit ,
 		project ,
-		tin_number 
+		tin_number ,
+		currency
 	FROM (
 		-- Detail rows
 		SELECT
 			gle.posting_date,
 			gle.voucher_type AS doc_type,
-			
+
 			CONCAT(
 				'<a href="/app/', 
 				LOWER(REPLACE(gle.voucher_type, ' ', '-')), 
@@ -187,6 +188,8 @@ def get_data(filters):
 				ELSE ''
 			END AS tin_number,
 			
+			gle.account_currency AS currency,
+			
 			CONCAT(
 				gle.posting_date, '-', 
 				gle.voucher_no, '-1-',
@@ -207,7 +210,6 @@ def get_data(filters):
 		WHERE gle.is_cancelled = 0
 			AND gle.company = %(company)s
 			AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			-- 👇 NEW FILTER LINE
 			AND IF(%(doc_type)s != '', gle.voucher_type = %(doc_type)s, 1=1)
 			AND EXISTS (
 				SELECT 1 
@@ -236,6 +238,7 @@ def get_data(filters):
 			SUM(COALESCE(gle.credit, 0)) AS credit,
 			'' AS project,
 			'' AS tin_number,
+			MAX(gle.account_currency) AS currency,
 			
 			CONCAT(gle.posting_date, '-', gle.voucher_no, '-2-0-00000') AS sort_order
 
@@ -245,7 +248,6 @@ def get_data(filters):
 		WHERE gle.is_cancelled = 0
 			AND gle.company = %(company)s
 			AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			-- 👇 NEW FILTER LINE
 			AND IF(%(doc_type)s != '', gle.voucher_type = %(doc_type)s, 1=1)
 			AND EXISTS (
 				SELECT 1 
@@ -275,6 +277,7 @@ def get_data(filters):
 			NULL AS credit,
 			'' AS project,
 			'' AS tin_number,
+			'' AS currency,
 			
 			CONCAT(gle.posting_date, '-', gle.voucher_no, '-3-0-00000') AS sort_order
 
@@ -283,7 +286,6 @@ def get_data(filters):
 		WHERE gle.is_cancelled = 0
 			AND gle.company = %(company)s
 			AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			-- 👇 NEW FILTER LINE
 			AND IF(%(doc_type)s != '', gle.voucher_type = %(doc_type)s, 1=1)
 			AND EXISTS (
 				SELECT 1 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Ambibuzz Technologies LLP
 // For license information, please see license.txt
 
-frappe.query_reports["Custom Trial Balance"] = {
+frappe.query_reports["BIR Statutory Trial Balance"] = {
 	filters: [
 		{
 			fieldname: "company",

@@ -3,7 +3,7 @@
 // License: GNU General Public License v3. See license.txt
 
 
-frappe.query_reports["Balance Sheet Schedule BIR"] = $.extend(
+frappe.query_reports["BIR Balance Sheet Schedule"] = $.extend(
 	{},
 	erpnext.financial_statements,
 	{
@@ -29,16 +29,16 @@ frappe.query_reports["Balance Sheet Schedule BIR"] = $.extend(
 		},
 	}
 );
-erpnext.utils.add_dimensions("Balance Sheet Schedule BIR", 10);
+erpnext.utils.add_dimensions("BIR Balance Sheet Schedule", 10);
 
-frappe.query_reports["Balance Sheet Schedule BIR"]["filters"].push({
+frappe.query_reports["BIR Balance Sheet Schedule"]["filters"].push({
 	fieldname: "accumulated_values",
 	label: __("Accumulated Values"),
 	fieldtype: "Check",
 	default: 1,
 });
 
-frappe.query_reports["Balance Sheet Schedule BIR"]["filters"].push({
+frappe.query_reports["BIR Balance Sheet Schedule"]["filters"].push({
 	fieldname: "include_default_book_entries",
 	label: __("Include Default FB Entries"),
 	fieldtype: "Check",

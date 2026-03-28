@@ -20,7 +20,7 @@ This app **replicates standard ERPNext reports** (starting with the Balance Shee
 
 ## Included Reports
 
-### Balance Sheet BIR
+### BIR Balance Sheet
 
 A replicated version of ERPNext’s standard **Balance Sheet** report with additional presentation and filtering capabilities.
 

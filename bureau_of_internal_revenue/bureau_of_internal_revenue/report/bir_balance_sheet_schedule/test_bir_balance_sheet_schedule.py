@@ -14,7 +14,7 @@ from bureau_of_internal_revenue.bureau_of_internal_revenue.report.balance_sheet_
 class TestBalanceSheetScheduleBIR(FrappeTestCase):
 	"""
 	Tests schedule-wise grouping and subtotal behavior
-	for the Balance Sheet Schedule BIR report.
+	for the BIR Balance Sheet Schedule report.
 	"""
 
 	@patch(

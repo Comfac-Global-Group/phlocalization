@@ -198,7 +198,7 @@ def get_provisional_profit_loss(
 
 
 def check_opening_balance(asset, liability, equity):
-	# Check if previous year Balance Sheet BIR closed
+	# Check if previous year BIR Balance Sheet closed
 	opening_balance = 0
 	float_precision = cint(frappe.db.get_default("float_precision")) or 2
 	if asset:

@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Ambibuzz Technologies LLP and contributors
 // For license information, please see license.txt
 
-frappe.query_reports["Accounts Payable Transaction Listing"] = {
+frappe.query_reports["BIR AP Transaction Journal"] = {
 	"filters": [
 		{
 			fieldname: "company",

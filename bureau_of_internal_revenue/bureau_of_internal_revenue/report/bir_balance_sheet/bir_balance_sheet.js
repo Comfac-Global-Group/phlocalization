@@ -1,7 +1,7 @@
 // Copyright (c) 2025, Ambibuzz Technologies LLP and contributors
 // For license information, please see license.txt
 
-frappe.query_reports["Balance Sheet BIR"] = $.extend(
+frappe.query_reports["BIR Balance Sheet"] = $.extend(
 	{},
 	erpnext.financial_statements,
 	{
@@ -25,9 +25,9 @@ frappe.query_reports["Balance Sheet BIR"] = $.extend(
 	}
 );
 
-erpnext.utils.add_dimensions("Balance Sheet BIR", 10);
+erpnext.utils.add_dimensions("BIR Balance Sheet", 10);
 
-frappe.query_reports["Balance Sheet BIR"]["filters"].push({
+frappe.query_reports["BIR Balance Sheet"]["filters"].push({
 	fieldname: "selected_view",
 	label: __("Select View"),
 	fieldtype: "Select",
@@ -39,21 +39,21 @@ frappe.query_reports["Balance Sheet BIR"]["filters"].push({
 	reqd: 1,
 });
 
-frappe.query_reports["Balance Sheet BIR"]["filters"].push({
+frappe.query_reports["BIR Balance Sheet"]["filters"].push({
 	fieldname: "accumulated_values",
 	label: __("Accumulated Values"),
 	fieldtype: "Check",
 	default: 1,
 });
 
-frappe.query_reports["Balance Sheet BIR"]["filters"].push({
+frappe.query_reports["BIR Balance Sheet"]["filters"].push({
 	fieldname: "include_default_book_entries",
 	label: __("Include Default FB Entries"),
 	fieldtype: "Check",
 	default: 1,
 });
 
-frappe.query_reports["Balance Sheet BIR"]["filters"].push({
+frappe.query_reports["BIR Balance Sheet"]["filters"].push({
 	fieldname: "level",
 	label: __("Show Levels Upto"),
 	fieldtype: "Select",

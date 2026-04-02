@@ -22,7 +22,10 @@ def execute(filters=None):
 		frappe.throw("From Date cannot be greater than To Date")
 
 	project = filters.get("project_like", "")
-	filters["project_like"] = f"%{project}%" if project else ""
+	if not project:
+		return get_columns(), []
+
+	filters["project_like"] = f"%{project}%"
 
 	columns = get_columns()
 	data = get_data(filters)
@@ -68,7 +71,7 @@ def get_data(filters):
 	"""
 
 	query = """
-	SELECT
+SELECT
 	p.name AS project_id,
 	p.department AS department,
 	p.customer AS customer,
@@ -131,7 +134,7 @@ def get_data(filters):
 		) AS so_date
 	FROM `tabProject` p2
 	WHERE p2.company = %(company)s
-	  AND ( %(project_like)s = '' OR p2.name LIKE %(project_like)s )
+	  AND p2.name LIKE %(project_like)s
 	) e ON e.project = p.name
 
 	/* Purchase Invoices grouped by project on PI item (amounts) */
@@ -145,7 +148,7 @@ def get_data(filters):
 			  AND pi.company = %(company)s
 			  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
 			  AND pii.project IS NOT NULL AND pii.project != ''
-			  AND ( %(project_like)s = '' OR pii.project LIKE %(project_like)s )
+			  AND pii.project LIKE %(project_like)s
 		) t
 		GROUP BY t.project
 	) pt ON pt.project = p.name
@@ -161,7 +164,7 @@ def get_data(filters):
 		WHERE si.docstatus = 1
 		  AND si.company = %(company)s
 		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		  AND ( %(project_like)s = '' OR sii.project LIKE %(project_like)s )
+		  AND sii.project LIKE %(project_like)s
 		GROUP BY COALESCE(NULLIF(sii.project, ''), '<<NO PROJECT>>')
 	) si ON si.project = p.name
 
@@ -175,7 +178,7 @@ def get_data(filters):
 		WHERE ts.docstatus = 1
 		  AND ts.company = %(company)s
 		  AND ts.start_date BETWEEN %(from_date)s AND %(to_date)s
-		  AND ( %(project_like)s = '' OR tsd.project LIKE %(project_like)s )
+		  AND tsd.project LIKE %(project_like)s
 		GROUP BY COALESCE(NULLIF(tsd.project, ''), '<<NO PROJECT>>')
 	) ts ON ts.project = p.name
 
@@ -189,7 +192,7 @@ LEFT JOIN (
 	WHERE ec.docstatus = 1
 	  AND ec.company = %(company)s
 	  AND ec.posting_date BETWEEN %(from_date)s AND %(to_date)s
-	  AND ( %(project_like)s = '' OR ecd.project LIKE %(project_like)s )
+	  AND ecd.project LIKE %(project_like)s
 	GROUP BY COALESCE(NULLIF(ecd.project, ''), '<<NO PROJECT>>')
 ) ec ON ec.project = p.name
 
@@ -211,7 +214,7 @@ LEFT JOIN (
 	  AND pi.company = %(company)s
 	  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
 	  AND pii.project IS NOT NULL
-	  AND ( %(project_like)s = '' OR pii.project LIKE %(project_like)s )
+	  AND pii.project LIKE %(project_like)s
 	GROUP BY COALESCE(NULLIF(pii.project, ''), '<<NO PROJECT>>')
 ) pir ON pir.project = p.name
 
@@ -232,7 +235,7 @@ LEFT JOIN (
 	WHERE je.docstatus = 1
 	  AND je.company = %(company)s
 	  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
-	  AND ( %(project_like)s = '' OR jea.project LIKE %(project_like)s )
+	  AND jea.project LIKE %(project_like)s
 	GROUP BY COALESCE(NULLIF(jea.project, ''), '<<NO PROJECT>>')
 	) jeur ON jeur.project = p.name
 
@@ -246,7 +249,7 @@ LEFT JOIN (
 		WHERE se.docstatus = 1
 		  AND se.company = %(company)s
 		  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		  AND ( %(project_like)s = '' OR COALESCE(sed.project, se.project) LIKE %(project_like)s )
+		  AND COALESCE(sed.project, se.project) LIKE %(project_like)s
 		  AND IFNULL(sed.s_warehouse, '') LIKE '%%Stores%%'
 		GROUP BY COALESCE(NULLIF(COALESCE(sed.project, se.project), ''), '<<NO PROJECT>>')
 	) mr ON mr.project = p.name
@@ -261,13 +264,13 @@ LEFT JOIN (
 		WHERE se.docstatus = 1
 		  AND se.company = %(company)s
 		  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		  AND ( %(project_like)s = '' OR COALESCE(sed.project, se.project) LIKE %(project_like)s )
+		  AND COALESCE(sed.project, se.project) LIKE %(project_like)s
 		  AND IFNULL(sed.t_warehouse, '') LIKE '%%Stores%%'
 		GROUP BY COALESCE(NULLIF(COALESCE(sed.project, se.project), ''), '<<NO PROJECT>>')
 	) mrs ON mrs.project = p.name
 
 	WHERE p.company = %(company)s
-	  AND ( %(project_like)s = '' OR p.name LIKE %(project_like)s )
+	  AND p.name LIKE %(project_like)s
 
 	ORDER BY p.name;
 	"""

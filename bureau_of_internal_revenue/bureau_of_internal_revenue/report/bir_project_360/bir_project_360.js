@@ -28,20 +28,8 @@ frappe.query_reports["BIR Project 360"] = {
 		{
 			fieldname: "project_like",
 			label: "Project ID",
-			fieldtype: "Link",
-			options: "Project",
+			fieldtype: "Data",
 			reqd: 1,
-			get_query: function () {
-				let from_date = frappe.query_report.get_filter_value("from_date");
-				let to_date = frappe.query_report.get_filter_value("to_date");
-
-				return {
-					filters: [
-						["Project", "expected_start_date", ">=", from_date],
-						["Project", "expected_end_date", "<=", to_date]
-					]
-				};
-			}
 		}
 	]
 };

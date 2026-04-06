@@ -1,0 +1,23 @@
+{
+ "add_total_row": 1,
+ "columns": [],
+ "creation": "2026-03-02 14:01:35.284100",
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "filters": [],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letterhead": null,
+ "modified": "2026-03-27 22:05:20.636061",
+ "modified_by": "Administrator",
+ "module": "Bureau of Internal Revenue",
+ "name": "BIR AP Transaction Journal",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "GL Entry",
+ "report_name": "BIR AP Transaction Journal",
+ "report_type": "Script Report",
+ "roles": [],
+ "timeout": 0
+}

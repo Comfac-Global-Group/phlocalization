@@ -75,6 +75,7 @@ SELECT
 	p.name AS project_id,
 	p.department AS department,
 	p.customer AS customer,
+	cust.customer_name AS customer_name,
 	e.so_name AS earliest_so,
 	p.expected_start_date AS expected_start_date,
 
@@ -110,6 +111,7 @@ SELECT
 
 	FROM `tabProject` p
 
+	LEFT JOIN `tabCustomer` cust ON cust.name = p.customer
 	LEFT JOIN `tabCompany` comp ON comp.name = p.company
 
 	/* Earliest SO per project - header-level project link only (soi.project does not exist) */

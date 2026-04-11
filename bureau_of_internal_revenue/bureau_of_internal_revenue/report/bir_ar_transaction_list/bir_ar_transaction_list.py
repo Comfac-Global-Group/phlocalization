@@ -161,7 +161,7 @@ def get_data(filters):
 					gle.voucher_no, '-1-',
 					CASE 
 						WHEN gle.credit > 0 THEN '3'
-						WHEN gle.debit > 0 AND a.account_number LIKE '1302%%' THEN '1'
+						WHEN gle.debit > 0 AND a.account_number LIKE '1301%%' THEN '1'
 						WHEN gle.debit > 0 THEN '2'
 						ELSE '9'
 					END,
@@ -181,7 +181,7 @@ def get_data(filters):
 				  JOIN `tabAccount` a2 ON a2.name = gle2.account
 				  WHERE gle2.voucher_no = gle.voucher_no
 					AND gle2.is_cancelled = 0
-					AND a2.account_number LIKE '1302%%'
+					AND a2.account_number LIKE '1301%%'
 					AND gle2.debit > 0
 			  )
 
@@ -220,7 +220,7 @@ def get_data(filters):
 				  JOIN `tabAccount` a2 ON a2.name = gle2.account
 				  WHERE gle2.voucher_no = gle.voucher_no
 					AND gle2.is_cancelled = 0
-					AND a2.account_number LIKE '1302%%'
+					AND a2.account_number LIKE '1301%%'
 					AND gle2.debit > 0
 			  )
 			GROUP BY gle.posting_date, gle.voucher_no

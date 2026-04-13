@@ -114,6 +114,7 @@ def get_data(filters):
                         SELECT COALESCE(pe.reference_no, '') FROM `tabPayment Entry` pe WHERE pe.name = gle.voucher_no
                     )
                     WHEN a.account_number LIKE '1301%%' THEN (
+                        /* custom_remarks → reference_name WHERE reference_doctype = Journal Entry */
                         SELECT GROUP_CONCAT(DISTINCT per.reference_name SEPARATOR '; ')
                         FROM `tabPayment Entry Reference` per
                         WHERE per.parent = gle.voucher_no
@@ -143,6 +144,7 @@ def get_data(filters):
                     WHEN %(status)s = 'Cancelled Only'
                     OR (%(status)s = 'All' AND gle.is_cancelled = 1)
                     THEN (
+                        /* cancelled: reference_name is already clean, no strip needed */
                         SELECT per.reference_name
                         FROM `tabPayment Entry Reference` per
                         WHERE per.parent = gle.voucher_no
@@ -151,6 +153,7 @@ def get_data(filters):
                         LIMIT 1
                     )
                     ELSE (
+                        /* posted: show JE ID from reference_name */
                         SELECT per.reference_name
                         FROM `tabPayment Entry Reference` per
                         WHERE per.parent = gle.voucher_no
@@ -181,6 +184,7 @@ def get_data(filters):
                         AND (
                             p2.reference_name = gle.against_voucher
                             OR (
+                                /* custom_remarks → reference_name WHERE reference_doctype = Journal Entry */
                                 p2.reference_doctype = 'Journal Entry'
                                 AND p2.reference_name IS NOT NULL AND p2.reference_name != ''
                                 AND ped.description IS NOT NULL
@@ -229,6 +233,7 @@ def get_data(filters):
                                     AND (
                                         p2.reference_name = gle.against_voucher
                                         OR (
+                                            /* custom_remarks → reference_name WHERE reference_doctype = Journal Entry */
                                             p2.reference_doctype = 'Journal Entry'
                                             AND p2.reference_name IS NOT NULL AND p2.reference_name != ''
                                             AND ped.description IS NOT NULL
@@ -279,7 +284,7 @@ def get_data(filters):
 
         UNION ALL
 
-        /* ======================= SUBTOTAL ROWS ======================= */
+/* ======================= SUBTOTAL ROWS ======================= */
         SELECT
             NULL AS transaction_date,
             '' AS doc_type,
@@ -294,74 +299,21 @@ def get_data(filters):
             '' AS reference_invoice,
             NULL AS reference_date,
 
-            CASE
-            WHEN %(status)s = 'Cancelled Only'
-                OR (%(status)s = 'All' AND MAX(gle.is_cancelled) = 1)
-            THEN MAX((
+            /* amount = paid_amount of the voucher */
+            MAX((
                 SELECT COALESCE(pe.paid_amount, 0)
                 FROM `tabPayment Entry` pe
                 WHERE pe.name = gle.voucher_no
-            ))
-            ELSE SUM(
-                CASE WHEN a.account_number LIKE '2201%%' THEN (
-                SELECT COALESCE(per.allocated_amount, 0)
-                FROM `tabPayment Entry Reference` per
-                WHERE per.parent = gle.voucher_no
-                    AND per.reference_name = gle.against_voucher
-                LIMIT 1
-                ) ELSE 0 END
-            )
-            END AS amount,
+            )) AS amount,
 
-            SUM(
-            CASE WHEN a.account_number LIKE '2201%%'
-                THEN COALESCE(gle.debit, 0) - COALESCE(gle.credit, 0)
-                ELSE 0
-            END
-            ) AS applied,
+            /* applied = sum of debit-credit across ALL accounts for this voucher */
+            SUM(COALESCE(gle.debit, 0) - COALESCE(gle.credit, 0)) AS applied,
 
             NULL AS ref_sort_key,
             CONCAT(gle.posting_date, '-', gle.voucher_no, '-2-0-00000') AS sort_order
 
         FROM `tabGL Entry` gle
         JOIN `tabAccount` a ON a.name = gle.account
-        WHERE
-            (
-                %(status)s = 'All'
-                OR (%(status)s = 'Cancelled Only' AND gle.is_cancelled = 1)
-                OR (%(status)s = 'Posted Only'    AND gle.is_cancelled = 0)
-            )
-            AND gle.company = %(company)s
-            AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
-            AND gle.voucher_type = 'Payment Entry'
-            AND EXISTS (
-                SELECT 1 FROM `tabPayment Entry` pe
-                WHERE pe.name = gle.voucher_no AND pe.payment_type = 'Pay'
-            )
-        GROUP BY gle.posting_date, gle.voucher_no
-
-        UNION ALL
-
-        /* ======================= SPACER ROWS ======================= */
-        SELECT
-            NULL AS transaction_date,
-            '' AS doc_type,
-            '' AS doc_no_html,
-            '' AS bank_account,
-            '' AS Vendor_name,
-            '' AS reference_html,
-            '' AS account,
-            '' AS cost_center,
-            NULL AS paid_amount,
-            '' AS description,
-            '' AS reference_invoice,
-            NULL AS reference_date,
-            NULL AS amount,
-            NULL AS applied,
-            NULL AS ref_sort_key,
-            CONCAT(gle.posting_date, '-', gle.voucher_no, '-3-0-00000') AS sort_order
-
-        FROM `tabGL Entry` gle
         WHERE
             (
                 %(status)s = 'All'
@@ -400,30 +352,12 @@ def get_data(filters):
         FROM (
             SELECT
                 gle.voucher_no,
-                CASE
-                WHEN %(status)s = 'Cancelled Only'
-                    OR (%(status)s = 'All' AND MAX(gle.is_cancelled) = 1)
-                THEN MAX((
+                MAX((
                     SELECT COALESCE(pe.paid_amount, 0)
                     FROM `tabPayment Entry` pe
                     WHERE pe.name = gle.voucher_no
-                ))
-                ELSE SUM(
-                    CASE WHEN a.account_number LIKE '2201%%' THEN (
-                    SELECT COALESCE(per.allocated_amount, 0)
-                    FROM `tabPayment Entry Reference` per
-                    WHERE per.parent = gle.voucher_no
-                        AND per.reference_name = gle.against_voucher
-                    LIMIT 1
-                    ) ELSE 0 END
-                )
-                END AS sub_amount,
-                SUM(
-                CASE WHEN a.account_number LIKE '2201%%'
-                    THEN COALESCE(gle.debit, 0) - COALESCE(gle.credit, 0)
-                    ELSE 0
-                END
-                ) AS sub_applied
+                )) AS sub_amount,
+                SUM(COALESCE(gle.debit, 0) - COALESCE(gle.credit, 0)) AS sub_applied
             FROM `tabGL Entry` gle
             JOIN `tabAccount` a ON a.name = gle.account
             WHERE

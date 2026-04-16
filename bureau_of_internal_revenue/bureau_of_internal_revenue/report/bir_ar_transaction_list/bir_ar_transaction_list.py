@@ -59,7 +59,8 @@ def get_data(filters):
 			credit,
 			project,
 			tin_number,
-			currency
+			currency,
+			row_type
 		FROM (
 			-- Detail rows
 			SELECT
@@ -156,6 +157,8 @@ def get_data(filters):
 					ELSE ''
 				END AS tin_number,
 
+				'detail' AS row_type,
+
 				CONCAT(
 					gle.posting_date, '-', 
 					gle.voucher_no, '-1-',
@@ -205,6 +208,9 @@ def get_data(filters):
 				comp.default_currency AS currency,
 
 				'' AS tin_number,
+
+				'subtotal' AS row_type,
+
 				CONCAT(gle.posting_date, '-', gle.voucher_no, '-2-0-00000') AS sort_order
 
 			FROM `tabGL Entry` gle
@@ -230,4 +236,55 @@ def get_data(filters):
 		ORDER BY sort_order
 	"""
 
-	return frappe.db.sql(query, filters, as_dict=True)
+	raw_data = frappe.db.sql(query, filters, as_dict=True)
+	
+	# Process data to add blank rows after each transaction (after subtotal)
+	processed_data = []
+	grand_total_debit = 0
+	grand_total_credit = 0
+	
+	for row in raw_data:
+		processed_data.append(row)
+		
+		# Track subtotals for grand total
+		if row.get("row_type") == "subtotal":
+			grand_total_debit += row.get("debit", 0) or 0
+			grand_total_credit += row.get("credit", 0) or 0
+			
+			# Add blank row after subtotal
+			processed_data.append({
+				"transaction_date": None,
+				"doc_type": "",
+				"doc_no_html": "",
+				"customer_name": "",
+				"reference_html": "",
+				"account": "",
+				"cost_center": "",
+				"description": "",
+				"debit": None,
+				"credit": None,
+				"project": "",
+				"tin_number": "",
+				"currency": row.get("currency", "")
+			})
+	
+	# Add grand total row at the end
+	if processed_data:
+		currency = raw_data[0].get("currency", "") if raw_data else ""
+		processed_data.append({
+			"transaction_date": None,
+			"doc_type": "",
+			"doc_no_html": "",
+			"customer_name": "",
+			"reference_html": "",
+			"account": "",
+			"cost_center": "",
+			"description": "<b>GRAND TOTAL</b>",
+			"debit": grand_total_debit,
+			"credit": grand_total_credit,
+			"project": "",
+			"tin_number": "",
+			"currency": currency
+		})
+	
+	return processed_data

@@ -331,6 +331,44 @@ def get_data(filters):
 
         UNION ALL
 
+        /* ======================= BLANK ROWS (after each transaction) ======================= */
+        SELECT
+            NULL AS transaction_date,
+            '' AS doc_type,
+            '' AS doc_no_html,
+            '' AS bank_account,
+            '' AS Vendor_name,
+            '' AS reference_html,
+            '' AS account,
+            '' AS cost_center,
+            NULL AS paid_amount,
+            '' AS description,
+            '' AS reference_invoice,
+            NULL AS reference_date,
+            NULL AS amount,
+            NULL AS applied,
+            NULL AS ref_sort_key,
+            CONCAT(gle.posting_date, '-', gle.voucher_no, '-3-0-00000') AS sort_order
+
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` a ON a.name = gle.account
+        WHERE
+            (
+                %(status)s = 'All'
+                OR (%(status)s = 'Cancelled Only' AND gle.is_cancelled = 1)
+                OR (%(status)s = 'Posted Only'    AND gle.is_cancelled = 0)
+            )
+            AND gle.company = %(company)s
+            AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+            AND gle.voucher_type = 'Payment Entry'
+            AND EXISTS (
+                SELECT 1 FROM `tabPayment Entry` pe
+                WHERE pe.name = gle.voucher_no AND pe.payment_type = 'Pay'
+            )
+        GROUP BY gle.posting_date, gle.voucher_no
+
+        UNION ALL
+
         /* ======================= GRAND TOTAL ROW ======================= */
         SELECT
             NULL AS transaction_date,

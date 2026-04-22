@@ -55,8 +55,6 @@ def get_account_range(account_number, company):
 def get_data(filters):
 	company = filters.get("company")
 
-	range_1200 = get_account_range("1200", company)
-	range_1300 = get_account_range("1300", company)
 	range_1600 = get_account_range("1600", company)
 
 	query = """
@@ -86,44 +84,8 @@ def get_data(filters):
 			AND pe.posting_date BETWEEN %(from_date)s AND %(to_date)s
 			AND pe.payment_type = 'Receive'
 			AND pe.party_type = 'Customer'
-		UNION ALL
-		SELECT
-			je.posting_date AS transaction_date,
-			NULL AS cr_or_no,
-			IFNULL(jea.party, je.pay_to_recd_from) AS customer_name,
-			NULL AS customer_address,
-			NULL AS customer_tin,
-			je.name AS reference_invoice_no,
-			IFNULL((SELECT jea2.reference_name FROM `tabJournal Entry Account` jea2 WHERE jea2.parent = je.name AND jea2.reference_type = 'Sales Invoice' LIMIT 1), '') AS invoice_no,
-			IFNULL((SELECT jea3.account FROM `tabJournal Entry Account` jea3 WHERE jea3.parent = je.name AND jea3.debit_in_account_currency > 0 LIMIT 1), '') AS account_name_dr,
-			IFNULL((SELECT SUM(jea4.debit_in_account_currency) FROM `tabJournal Entry Account` jea4
-				INNER JOIN `tabAccount` acc4 ON acc4.name = jea4.account
-				WHERE jea4.parent = je.name AND acc4.lft >= {lft_1200} AND acc4.rgt <= {rgt_1200}), 0) AS cash_amount,
-			IFNULL((SELECT SUM(jea4.debit_in_account_currency) FROM `tabJournal Entry Account` jea4
-				INNER JOIN `tabAccount` acc4 ON acc4.name = jea4.account
-				WHERE jea4.parent = je.name AND acc4.lft >= {lft_1200} AND acc4.rgt <= {rgt_1200}), 0) AS check_amount,
-			0 AS other_charges,
-			IFNULL((SELECT SUM(jea5.debit_in_account_currency) FROM `tabJournal Entry Account` jea5
-				INNER JOIN `tabAccount` acc5 ON acc5.name = jea5.account
-				WHERE jea5.parent = je.name AND acc5.lft >= {lft_1600} AND acc5.rgt <= {rgt_1600}), 0) AS cwt,
-			0 AS overpayment,
-			IFNULL((SELECT SUM(jea6.credit_in_account_currency) FROM `tabJournal Entry Account` jea6
-				INNER JOIN `tabAccount` acc6 ON acc6.name = jea6.account
-				WHERE jea6.parent = je.name AND acc6.lft >= {lft_1300} AND acc6.rgt <= {rgt_1300}), 0) AS accounts_receivable,
-			IFNULL((SELECT jea7.account_currency FROM `tabJournal Entry Account` jea7
-				WHERE jea7.parent = je.name LIMIT 1), '') AS currency
-
-		FROM `tabJournal Entry` je
-		LEFT JOIN `tabJournal Entry Account` jea ON jea.parent = je.name AND jea.party_type = 'Customer'
-		WHERE
-			je.docstatus = 1
-			AND je.company = %(company)s
-			AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		GROUP BY je.name
-		ORDER BY 1 ASC, 2 ASC
+		ORDER BY pe.posting_date ASC, pe.name ASC
 	""".format(
-		lft_1200=range_1200["lft"], rgt_1200=range_1200["rgt"],
-		lft_1300=range_1300["lft"], rgt_1300=range_1300["rgt"],
 		lft_1600=range_1600["lft"], rgt_1600=range_1600["rgt"],
 	)
 

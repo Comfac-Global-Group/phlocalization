@@ -67,8 +67,8 @@ def get_data(filters):
 			IFNULL((SELECT per.reference_name FROM `tabPayment Entry Reference` per WHERE per.parent = pe.name AND per.reference_doctype = 'Sales Invoice' LIMIT 1), '') AS reference_invoice_no,
 			IFNULL((SELECT per.reference_name FROM `tabPayment Entry Reference` per WHERE per.parent = pe.name AND per.reference_doctype = 'Sales Invoice' LIMIT 1), '') AS invoice_no,
 			pe.paid_to AS account_name_dr,
-			CASE WHEN pe.mode_of_payment = 'Cash' THEN pe.paid_amount ELSE 0 END AS cash_amount,
-			CASE WHEN pe.mode_of_payment != 'Cash' THEN pe.paid_amount ELSE 0 END AS check_amount,
+			CASE WHEN LOWER(pe.mode_of_payment) LIKE '%%cash%%' THEN pe.paid_amount ELSE 0 END AS cash_amount,
+			CASE WHEN LOWER(pe.mode_of_payment) NOT LIKE '%%cash%%' THEN pe.paid_amount ELSE 0 END AS check_amount,
 			0 AS other_charges,
 			IFNULL((SELECT SUM(ped.amount) FROM `tabPayment Entry Deduction` ped
 				INNER JOIN `tabAccount` acc ON acc.name = ped.account

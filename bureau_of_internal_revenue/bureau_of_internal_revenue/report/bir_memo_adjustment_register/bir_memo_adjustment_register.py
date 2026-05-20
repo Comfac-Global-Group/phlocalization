@@ -85,7 +85,7 @@ def get_columns():
 
 
 def get_data(filters):
-    return frappe.db.sql(
+    data = frappe.db.sql(
         """
         SELECT
             transaction_date,
@@ -188,3 +188,30 @@ def get_data(filters):
         filters,
         as_dict=1
     )
+
+    # This avoids any dependency on subtotal description formatting
+    grand_total_debit = 0.0
+    grand_total_credit = 0.0
+
+    for row in data:
+        if row.get("transaction_date"):
+            grand_total_debit += row.get("debit") or 0
+            grand_total_credit += row.get("credit") or 0
+
+    # Append grand total as the very last row
+    if data:
+        data.append({
+            "transaction_date": None,
+            "doc_no": "",
+            "doc_type": "",
+            "account": "",
+            "cost_center": "",
+            "description": "<b>GRAND TOTAL</b>",
+            "debit": grand_total_debit,
+            "credit": grand_total_credit,
+            "invoice_no": "",
+            "reference_html": "",
+            "party": ""
+        })
+
+    return data

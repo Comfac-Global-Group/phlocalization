@@ -183,6 +183,12 @@ FROM (
                 THEN TRIM(SUBSTRING_INDEX(COALESCE(g.remarks,''), 'Note:', 1))
             WHEN g.account IN (2201, 1301)
                 THEN g.party
+            /* --- Payment Entry: Pay or Receive → pull item descriptions from linked invoice --- */
+            WHEN g.voucher_type = 'Payment Entry'
+                 AND COALESCE(g.voucher_subtype, pe.payment_type) IN ('Pay', 'Receive')
+                 AND pe_ref_items.item_descriptions IS NOT NULL
+                THEN pe_ref_items.item_descriptions
+            /* --- Payment Entry: fallback to remarks/against --- */
             WHEN g.voucher_type = 'Payment Entry'
                 THEN COALESCE(NULLIF(TRIM(per.remarks), ''), g.against)
             WHEN g.remarks LIKE '%%received from%%'
@@ -292,6 +298,43 @@ FROM (
     LEFT JOIN `tabPurchase Receipt` pr ON pr.name = g.voucher_no AND g.voucher_type = 'Purchase Receipt'
     LEFT JOIN `tabStock Reconciliation` sr
            ON sr.name = g.voucher_no AND g.voucher_type = 'Stock Reconciliation'
+    /* --- Item descriptions from linked invoices via Payment Entry Reference --- */
+    /* Single consolidated join: resolves to Purchase Invoice items for Pay,    */
+    /* Sales Invoice items for Receive, keyed by (parent, payment_type) so     */
+    /* a Payment Entry that somehow references both doctype categories will     */
+    /* only match the row corresponding to its actual payment_type.            */
+    LEFT JOIN (
+        SELECT
+            per_ref.parent,
+            pe_inner.payment_type,
+            GROUP_CONCAT(
+                DISTINCT item_desc.description
+                ORDER BY item_desc.idx
+                SEPARATOR ', '
+            ) AS item_descriptions
+        FROM `tabPayment Entry Reference` per_ref
+        JOIN `tabPayment Entry` pe_inner
+            ON pe_inner.name = per_ref.parent
+        JOIN (
+            /* Purchase Invoice items (for Pay) */
+            SELECT pii.parent, pii.description, pii.idx, 'Purchase Invoice' AS ref_doctype
+            FROM `tabPurchase Invoice Item` pii
+            UNION ALL
+            /* Sales Invoice items (for Receive) */
+            SELECT sii.parent, sii.description, sii.idx, 'Sales Invoice' AS ref_doctype
+            FROM `tabSales Invoice Item` sii
+        ) item_desc
+            ON item_desc.parent = per_ref.reference_name
+           AND item_desc.ref_doctype = per_ref.reference_doctype
+        WHERE (
+            (per_ref.reference_doctype = 'Purchase Invoice' AND pe_inner.payment_type = 'Pay')
+            OR
+            (per_ref.reference_doctype = 'Sales Invoice'    AND pe_inner.payment_type = 'Receive')
+        )
+        GROUP BY per_ref.parent, pe_inner.payment_type
+    ) pe_ref_items ON pe_ref_items.parent = g.voucher_no
+        AND pe_ref_items.payment_type = COALESCE(g.voucher_subtype, pe.payment_type)
+        AND g.voucher_type = 'Payment Entry'
     WHERE g.docstatus = 1
       AND IFNULL(g.is_cancelled, 0) = 0
       AND g.company = %(company)s

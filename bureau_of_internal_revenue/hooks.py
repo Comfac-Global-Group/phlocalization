@@ -8,7 +8,7 @@ app_license = "mit"
 # Apps
 # ------------------
 
-# required_apps = []
+required_apps = ["frappe/erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -85,13 +85,15 @@ doctype_js = {
 # ------------
 
 # before_install = "bureau_of_internal_revenue.install.before_install"
-# after_install = "bureau_of_internal_revenue.install.after_install"
+after_install = "bureau_of_internal_revenue.bureau_of_internal_revenue.setup.after_install"
 
 # Uninstallation
 # ------------
 
-# before_uninstall = "bureau_of_internal_revenue.uninstall.before_uninstall"
+before_uninstall = "bureau_of_internal_revenue.bureau_of_internal_revenue.setup.before_uninstall"
 # after_uninstall = "bureau_of_internal_revenue.uninstall.after_uninstall"
+
+after_migrate = ["bureau_of_internal_revenue.bureau_of_internal_revenue.setup.after_install"]
 
 # Integration Setup
 # ------------------
@@ -243,12 +245,3 @@ doctype_js = {
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
-
-fixtures = [
-	{
-		"doctype": "Custom Field",
-		"filters": [
-			["Custom Field","module","=","Bureau of Internal Revenue"],
-		]
-	},
-]

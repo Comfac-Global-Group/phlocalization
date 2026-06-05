@@ -14,7 +14,7 @@ def get_columns():
 	return [
 		{"label": "Transaction Date", "fieldname": "transaction_date", "fieldtype": "Date", "width": 110},
 		{"label": "Vendor Name", "fieldname": "vendor_name", "fieldtype": "Data", "width": 200},
-		{"label": "Vendor Address", "fieldname": "vendor_address", "fieldtype": "Data", "width": 180},
+		{"label": "Vendor Address", "fieldname": "vendor_address", "fieldtype": "Data", "width": 250},
 		{"label": "Vendor TIN", "fieldname": "vendor_tin", "fieldtype": "Data", "width": 120},
 		{"label": "Description", "fieldname": "description", "fieldtype": "Data", "width": 180},
 		{"label": "Reference No", "fieldname": "reference_no", "fieldtype": "Link", "options": "Purchase Invoice", "width": 140},
@@ -35,7 +35,13 @@ def get_data(filters):
 		SELECT
 			pi.posting_date AS transaction_date,
 			pi.supplier_name AS vendor_name,
-			pi.supplier_address AS vendor_address,
+			TRIM(BOTH ', ' FROM CONCAT_WS(', ',
+				NULLIF(addr.address_line1, ''),
+				NULLIF(addr.address_line2, ''),
+				NULLIF(addr.city, ''),
+				NULLIF(addr.state, ''),
+				NULLIF(addr.country, '')
+			)) AS vendor_address,
 			pi.tax_id AS vendor_tin,
 			pi.remarks AS description,
 			pi.name AS reference_no,
@@ -108,6 +114,10 @@ def get_data(filters):
 				- IFNULL(pi.discount_amount, 0)
 			) AS net_purchase
 		FROM `tabPurchase Invoice` pi
+		LEFT JOIN `tabSupplier` sup
+			ON sup.name = pi.supplier
+		LEFT JOIN `tabAddress` addr
+			ON addr.name = sup.supplier_primary_address
 		WHERE
 			pi.docstatus = 1
 			AND pi.company = %(company)s

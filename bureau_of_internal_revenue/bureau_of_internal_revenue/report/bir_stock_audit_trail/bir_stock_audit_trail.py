@@ -59,8 +59,7 @@ def get_columns():
 def get_data(filters):
 	"""
 	Build and execute the audit trail SQL query.
-	Uses nested subquery pattern matching the original client SQL,
-	with custom_project replaced by se.project / pr.project.
+	JO Number uses line-level project first: COALESCE(sed.project, se.project) and COALESCE(pri.project, pr.project). Stock Reconciliation has no project field so its jo_number is blank.
 	"""
 	params = {
 		"warehouse": filters.get("warehouse"),
@@ -134,7 +133,7 @@ def get_data(filters):
 					END AS entry_type,
 					se.name AS id,
 					'Stock Entry' AS doctype,
-					COALESCE(se.project, '') AS jo_number,
+					COALESCE(sed.project, se.project, '') AS jo_number,
 					se.posting_date,
 					COALESCE(p.customer, '') AS supp_cust_code,
 					COALESCE(c.customer_name, '') AS supplier,
@@ -159,7 +158,7 @@ def get_data(filters):
 					END AS status
 				FROM `tabStock Entry` se
 				JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
-				LEFT JOIN `tabProject` p ON p.name = se.project
+				LEFT JOIN `tabProject` p ON p.name = COALESCE(sed.project, se.project)
 				LEFT JOIN `tabCustomer` c ON c.name = p.customer
 				WHERE
 					se.stock_entry_type = 'Material Transfer'
@@ -169,7 +168,7 @@ def get_data(filters):
 					)
 					AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND se.docstatus IN (0, 1, 2)
-					AND (%(project)s = '' OR se.project = %(project)s)
+					AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
 
 				UNION ALL
 
@@ -214,7 +213,7 @@ def get_data(filters):
 					'Receiving Reports' AS entry_type,
 					pr.name AS id,
 					'Purchase Receipt' AS doctype,
-					COALESCE(pr.project, '') AS jo_number,
+					COALESCE(pri.project, pr.project, '') AS jo_number,
 					pr.posting_date,
 					COALESCE(pr.supplier_name, '') AS supp_cust_code,
 					COALESCE(pr.supplier_name, '') AS supplier,
@@ -239,7 +238,7 @@ def get_data(filters):
 					pri.warehouse = %(warehouse)s
 					AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND pr.docstatus IN (0, 1, 2)
-					AND (%(project)s = '' OR pr.project = %(project)s)
+					AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
 			) audit_data
 			WHERE
 				(%(entry_type)s IS NULL
@@ -281,7 +280,7 @@ def get_data(filters):
 						WHEN sed.t_warehouse = %(warehouse)s THEN 'Materials Requirement - Returns'
 						ELSE 'Materials Requirement'
 					END AS entry_type,
-					COALESCE(se.project, '') AS jo_number,
+					COALESCE(sed.project, se.project, '') AS jo_number,
 					CASE
 						WHEN sed.s_warehouse = %(warehouse)s THEN sed.qty
 						WHEN sed.t_warehouse = %(warehouse)s THEN -sed.qty
@@ -298,7 +297,7 @@ def get_data(filters):
 					)
 					AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND se.docstatus IN (0, 1, 2)
-					AND (%(project)s = '' OR se.project = %(project)s)
+					AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
 
 				UNION ALL
 
@@ -320,7 +319,7 @@ def get_data(filters):
 
 				SELECT
 					'Receiving Reports' AS entry_type,
-					COALESCE(pr.project, '') AS jo_number,
+					COALESCE(pri.project, pr.project, '') AS jo_number,
 					pri.qty AS qty_diff,
 					COALESCE(pri.stock_qty * pri.valuation_rate, 0) AS total_cost
 				FROM `tabPurchase Receipt` pr
@@ -329,7 +328,7 @@ def get_data(filters):
 					pri.warehouse = %(warehouse)s
 					AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND pr.docstatus IN (0, 1, 2)
-					AND (%(project)s = '' OR pr.project = %(project)s)
+					AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
 			) audit_data
 			WHERE
 				(%(entry_type)s IS NULL
@@ -371,7 +370,7 @@ def get_data(filters):
 							WHEN sed.t_warehouse = %(warehouse)s THEN 'Materials Requirement - Returns'
 							ELSE 'Materials Requirement'
 						END AS entry_type,
-						COALESCE(se.project, '') AS jo_number
+						COALESCE(sed.project, se.project, '') AS jo_number
 					FROM `tabStock Entry` se
 					JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
 					WHERE
@@ -382,7 +381,7 @@ def get_data(filters):
 						)
 						AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 						AND se.docstatus IN (0, 1, 2)
-						AND (%(project)s = '' OR se.project = %(project)s)
+						AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
 
 					UNION ALL
 
@@ -402,14 +401,14 @@ def get_data(filters):
 
 					SELECT
 						'Receiving Reports' AS entry_type,
-						COALESCE(pr.project, '') AS jo_number
+						COALESCE(pri.project, pr.project, '') AS jo_number
 					FROM `tabPurchase Receipt` pr
 					JOIN `tabPurchase Receipt Item` pri ON pri.parent = pr.name
 					WHERE
 						pri.warehouse = %(warehouse)s
 						AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 						AND pr.docstatus IN (0, 1, 2)
-						AND (%(project)s = '' OR pr.project = %(project)s)
+						AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
 				) all_jos
 				WHERE
 					jo_number != ''
@@ -469,7 +468,7 @@ def get_data(filters):
 					)
 					AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND se.docstatus IN (0, 1, 2)
-					AND (%(project)s = '' OR se.project = %(project)s)
+					AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
 
 				UNION ALL
 
@@ -498,7 +497,7 @@ def get_data(filters):
 					pri.warehouse = %(warehouse)s
 					AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND pr.docstatus IN (0, 1, 2)
-					AND (%(project)s = '' OR pr.project = %(project)s)
+					AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
 			) audit_data
 			WHERE
 				(%(entry_type)s IS NULL

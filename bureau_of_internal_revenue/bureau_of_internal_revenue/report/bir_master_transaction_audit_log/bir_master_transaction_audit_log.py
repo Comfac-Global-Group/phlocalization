@@ -148,6 +148,7 @@ FROM (
           sr.name,
           g.against_voucher
         ) AS reference_no,
+        /* ---- PAYEE / RECEIVED FROM ---- */
         CASE
           WHEN g.voucher_type = 'Journal Entry'
             THEN COALESCE(cust_je.customer_name, supp_je.supplier_name, emp_je.employee_name, g.party, jea.party)
@@ -161,7 +162,34 @@ FROM (
             THEN COALESCE(pr.supplier, pr.supplier_name)
           ELSE g.party
         END AS party,
+        /* ---- PARTICULARS ---- */
         CASE
+            /* Pay: PI items -> JE user_remark -> PE remarks -> PE Ref names -> party */
+            WHEN g.voucher_type = 'Payment Entry'
+              AND COALESCE(g.voucher_subtype, pe.payment_type) = 'Pay'
+                THEN COALESCE(
+                       NULLIF(TRIM(pi_items.description), ''),
+                       NULLIF(TRIM(je_items.user_remark), ''),
+                       NULLIF(TRIM(pe.remarks), ''),
+                       NULLIF(TRIM(per.ref_names), ''),
+                       NULLIF(TRIM(pe.party_name), ''),
+                       g.against
+                     )
+
+            /* Receive: SI items -> PE remarks -> PE Ref names -> party */
+            WHEN g.voucher_type = 'Payment Entry'
+              AND COALESCE(g.voucher_subtype, pe.payment_type) = 'Receive'
+                THEN COALESCE(
+                       NULLIF(TRIM(si_items.description), ''),
+                       NULLIF(TRIM(pe.remarks), ''),
+                       NULLIF(TRIM(per.ref_names), ''),
+                       NULLIF(TRIM(pe.party_name), ''),
+                       g.against
+                     )
+
+            WHEN acc.account_type IN ('Payable', 'Receivable')
+                THEN g.party
+
             WHEN g.voucher_type = 'Journal Entry'
                 THEN COALESCE(
                        NULLIF(TRIM(jea.user_remark), ''),
@@ -170,27 +198,8 @@ FROM (
                      )
             WHEN g.voucher_subtype = 'Depreciation Entry'
                 THEN TRIM(SUBSTRING_INDEX(COALESCE(g.remarks,''), 'Note:', 1))
-            WHEN g.account = 1521 AND g.against LIKE '1521 - PROJECTS IN PROGRESS - ESCO%%'
-                THEN TRIM(
-                    SUBSTRING(
-                        SUBSTRING_INDEX(COALESCE(g.remarks,''), 'Note:', 1),
-                        LOCATE(' ', COALESCE(g.remarks,'')) + LENGTH(SUBSTRING_INDEX(COALESCE(g.remarks,''),' ','1')) + 1
-                    )
-                )
-            WHEN g.account = 1521
-                THEN TRIM(SUBSTRING(SUBSTRING_INDEX(COALESCE(g.remarks,''), 'Note:', 1), LOCATE(' ', COALESCE(g.remarks,'')) + 1))
-            WHEN g.account IN (1291, 1293)
-                THEN TRIM(SUBSTRING_INDEX(COALESCE(g.remarks,''), 'Note:', 1))
-            WHEN g.account IN (2201, 1301)
-                THEN g.party
-            /* --- Payment Entry: Pay or Receive → pull item descriptions from linked invoice --- */
             WHEN g.voucher_type = 'Payment Entry'
-                 AND COALESCE(g.voucher_subtype, pe.payment_type) IN ('Pay', 'Receive')
-                 AND pe_ref_items.item_descriptions IS NOT NULL
-                THEN pe_ref_items.item_descriptions
-            /* --- Payment Entry: fallback to remarks/against --- */
-            WHEN g.voucher_type = 'Payment Entry'
-                THEN COALESCE(NULLIF(TRIM(per.remarks), ''), g.against)
+                THEN COALESCE(NULLIF(TRIM(pe.remarks), ''), g.against)
             WHEN g.remarks LIKE '%%received from%%'
                 THEN TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(COALESCE(g.remarks,''), 'Transaction reference no', 1), 'received from ', -1))
             WHEN g.remarks LIKE '%%PAY PRD%%'
@@ -271,6 +280,9 @@ FROM (
         ) AS sort_order,
         COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2)) AS dept_code
     FROM `tabGL Entry` g
+    LEFT JOIN `tabAccount` acc
+           ON acc.name = g.account
+          AND acc.company = %(company)s
     LEFT JOIN `tabJournal Entry Account` jea
            ON jea.parent = g.voucher_no
           AND jea.name   = g.voucher_detail_no
@@ -288,9 +300,9 @@ FROM (
           AND g.voucher_type = 'Journal Entry'
     LEFT JOIN `tabPayment Entry` pe ON pe.name = g.voucher_no AND g.voucher_type = 'Payment Entry'
     LEFT JOIN (
-        SELECT name AS parent, remarks
-        FROM `tabPayment Entry`
-        WHERE IFNULL(remarks, '') <> ''
+        SELECT parent, GROUP_CONCAT(name ORDER BY idx SEPARATOR '; ') AS ref_names
+        FROM `tabPayment Entry Reference`
+        GROUP BY parent
     ) per ON per.parent = g.voucher_no AND g.voucher_type = 'Payment Entry'
     LEFT JOIN `tabJournal Entry`    je ON je.name = g.voucher_no AND g.voucher_type = 'Journal Entry'
     LEFT JOIN `tabSales Invoice`    si ON si.name = g.voucher_no AND g.voucher_type = 'Sales Invoice'
@@ -298,43 +310,58 @@ FROM (
     LEFT JOIN `tabPurchase Receipt` pr ON pr.name = g.voucher_no AND g.voucher_type = 'Purchase Receipt'
     LEFT JOIN `tabStock Reconciliation` sr
            ON sr.name = g.voucher_no AND g.voucher_type = 'Stock Reconciliation'
-    /* --- Item descriptions from linked invoices via Payment Entry Reference --- */
-    /* Single consolidated join: resolves to Purchase Invoice items for Pay,    */
-    /* Sales Invoice items for Receive, keyed by (parent, payment_type) so     */
-    /* a Payment Entry that somehow references both doctype categories will     */
-    /* only match the row corresponding to its actual payment_type.            */
+
+    /* ---- Purchase Invoice items for Pay ---- */
     LEFT JOIN (
         SELECT
-            per_ref.parent,
-            pe_inner.payment_type,
+            per2.parent AS pe_name,
             GROUP_CONCAT(
-                DISTINCT item_desc.description
-                ORDER BY item_desc.idx
-                SEPARATOR ', '
-            ) AS item_descriptions
-        FROM `tabPayment Entry Reference` per_ref
-        JOIN `tabPayment Entry` pe_inner
-            ON pe_inner.name = per_ref.parent
-        JOIN (
-            /* Purchase Invoice items (for Pay) */
-            SELECT pii.parent, pii.description, pii.idx, 'Purchase Invoice' AS ref_doctype
-            FROM `tabPurchase Invoice Item` pii
-            UNION ALL
-            /* Sales Invoice items (for Receive) */
-            SELECT sii.parent, sii.description, sii.idx, 'Sales Invoice' AS ref_doctype
-            FROM `tabSales Invoice Item` sii
-        ) item_desc
-            ON item_desc.parent = per_ref.reference_name
-           AND item_desc.ref_doctype = per_ref.reference_doctype
-        WHERE (
-            (per_ref.reference_doctype = 'Purchase Invoice' AND pe_inner.payment_type = 'Pay')
-            OR
-            (per_ref.reference_doctype = 'Sales Invoice'    AND pe_inner.payment_type = 'Receive')
-        )
-        GROUP BY per_ref.parent, pe_inner.payment_type
-    ) pe_ref_items ON pe_ref_items.parent = g.voucher_no
-        AND pe_ref_items.payment_type = COALESCE(g.voucher_subtype, pe.payment_type)
-        AND g.voucher_type = 'Payment Entry'
+                DISTINCT NULLIF(TRIM(pii.description), '')
+                ORDER BY pii.idx
+                SEPARATOR '; '
+            ) AS description
+        FROM `tabPayment Entry Reference` per2
+        JOIN `tabPurchase Invoice Item` pii
+          ON pii.parent = per2.reference_name
+        WHERE per2.reference_doctype = 'Purchase Invoice'
+          AND IFNULL(pii.description, '') <> ''
+        GROUP BY per2.parent
+    ) pi_items ON pi_items.pe_name = g.voucher_no AND g.voucher_type = 'Payment Entry'
+
+    /* ---- Sales Invoice items for Receive ---- */
+    LEFT JOIN (
+        SELECT
+            per2.parent AS pe_name,
+            GROUP_CONCAT(
+                DISTINCT NULLIF(TRIM(sii.description), '')
+                ORDER BY sii.idx
+                SEPARATOR '; '
+            ) AS description
+        FROM `tabPayment Entry Reference` per2
+        JOIN `tabSales Invoice Item` sii
+          ON sii.parent = per2.reference_name
+        WHERE per2.reference_doctype = 'Sales Invoice'
+          AND IFNULL(sii.description, '') <> ''
+        GROUP BY per2.parent
+    ) si_items ON si_items.pe_name = g.voucher_no AND g.voucher_type = 'Payment Entry'
+
+    /* ---- Journal Entry Account user_remark for Pay referencing JE ---- */
+    LEFT JOIN (
+        SELECT
+            per2.parent AS pe_name,
+            GROUP_CONCAT(
+                DISTINCT NULLIF(TRIM(jea2.user_remark), '')
+                ORDER BY jea2.idx
+                SEPARATOR '; '
+            ) AS user_remark
+        FROM `tabPayment Entry Reference` per2
+        JOIN `tabJournal Entry Account` jea2
+          ON jea2.parent = per2.reference_name
+        WHERE per2.reference_doctype = 'Journal Entry'
+          AND IFNULL(jea2.user_remark, '') <> ''
+        GROUP BY per2.parent
+    ) je_items ON je_items.pe_name = g.voucher_no AND g.voucher_type = 'Payment Entry'
+
     WHERE g.docstatus = 1
       AND IFNULL(g.is_cancelled, 0) = 0
       AND g.company = %(company)s
@@ -343,7 +370,7 @@ FROM (
 
     UNION ALL
 
-    /* ======== DEPARTMENT SUBTOTAL ROWS (COGS only) ======== */
+    /* ======== DEPARTMENT SUBTOTAL ROWS ======== */
     SELECT
         NULL AS account,
         NULL AS cost_center,
@@ -477,28 +504,15 @@ FROM (
 
     /* ======== BLANK SEPARATOR ROW ======== */
     SELECT
-        NULL AS account,
-        NULL AS cost_center,
-        NULL AS transaction_date,
-        NULL AS doc_type,
-        NULL AS doc_type_label,
-        NULL AS doc_no,
-        NULL AS reference_no,
-        NULL AS party,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
         '' AS particulars,
-        NULL AS beginning_balance,
-        NULL AS debit,
-        NULL AS credit,
-        NULL AS net_debit,
-        NULL AS net_credit,
-        NULL AS balance_debit,
-        NULL AS balance_credit,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
         CONCAT(ais.account, '-4') AS sort_order,
         NULL AS dept_code
     FROM accounts_in_scope ais
 
 ) combined
-ORDER BY sort_order, transaction_date
+ORDER BY sort_order, transaction_date;
 """
 
 	return frappe.db.sql(sql, filters, as_dict=True)

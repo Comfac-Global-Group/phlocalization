@@ -1,0 +1,27 @@
+{
+ "doctype": "Report",
+ "name": "BIR Inventory Status Report",
+ "report_name": "BIR Inventory Status Report",
+ "module": "Bureau of Internal Revenue",
+ "ref_doctype": "Sales Invoice",
+ "report_type": "Script Report",
+ "is_standard": "Yes",
+ "disabled": 0,
+ "docstatus": 0,
+ "idx": 0,
+ "owner": "Administrator",
+ "modified_by": "Administrator",
+ "creation": "2026-06-19 18:01:35.284100",
+ "modified": "2026-06-19 18:01:35.284100",
+ "roles": [
+  {
+   "role": "Accounts User"
+  },
+  {
+   "role": "Accounts Manager"
+  },
+  {
+   "role": "Auditor"
+  }
+ ]
+}

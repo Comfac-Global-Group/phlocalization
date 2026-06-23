@@ -511,8 +511,92 @@ FROM (
         NULL AS dept_code
     FROM accounts_in_scope ais
 
+    UNION ALL
+
+    /* ======== GRAND TOTAL ROW (all accounts in scope) ======== */
+    SELECT
+        NULL AS account,
+        NULL AS cost_center,
+        NULL AS transaction_date,
+        NULL AS doc_type,
+        NULL AS doc_type_label,
+        NULL AS doc_no,
+        NULL AS reference_no,
+        NULL AS party,
+        '<b>GRAND TOTAL:</b>' AS particulars,
+        NULL AS beginning_balance,
+        COALESCE(SUM(gle.debit), 0) AS debit,
+        COALESCE(SUM(gle.credit), 0) AS credit,
+        CASE WHEN COALESCE(SUM(gle.debit) - SUM(gle.credit), 0) > 0
+             THEN COALESCE(SUM(gle.debit) - SUM(gle.credit), 0) ELSE 0 END AS net_debit,
+        CASE WHEN COALESCE(SUM(gle.credit) - SUM(gle.debit), 0) > 0
+             THEN COALESCE(SUM(gle.credit) - SUM(gle.debit), 0) ELSE 0 END AS net_credit,
+        CASE
+          WHEN (
+            COALESCE((
+              SELECT SUM(gle_bb.debit - gle_bb.credit)
+              FROM `tabGL Entry` gle_bb
+              WHERE gle_bb.docstatus = 1
+                AND IFNULL(gle_bb.is_cancelled, 0) = 0
+                AND gle_bb.company = %(company)s
+                AND gle_bb.posting_date < %(from_date)s
+                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
+            ), 0)
+            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
+          ) > 0
+          THEN (
+            COALESCE((
+              SELECT SUM(gle_bb.debit - gle_bb.credit)
+              FROM `tabGL Entry` gle_bb
+              WHERE gle_bb.docstatus = 1
+                AND IFNULL(gle_bb.is_cancelled, 0) = 0
+                AND gle_bb.company = %(company)s
+                AND gle_bb.posting_date < %(from_date)s
+                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
+            ), 0)
+            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
+          )
+          ELSE 0
+        END AS balance_debit,
+        CASE
+          WHEN (
+            COALESCE((
+              SELECT SUM(gle_bb.debit - gle_bb.credit)
+              FROM `tabGL Entry` gle_bb
+              WHERE gle_bb.docstatus = 1
+                AND IFNULL(gle_bb.is_cancelled, 0) = 0
+                AND gle_bb.company = %(company)s
+                AND gle_bb.posting_date < %(from_date)s
+                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
+            ), 0)
+            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
+          ) < 0
+          THEN ABS(
+            COALESCE((
+              SELECT SUM(gle_bb.debit - gle_bb.credit)
+              FROM `tabGL Entry` gle_bb
+              WHERE gle_bb.docstatus = 1
+                AND IFNULL(gle_bb.is_cancelled, 0) = 0
+                AND gle_bb.company = %(company)s
+                AND gle_bb.posting_date < %(from_date)s
+                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
+            ), 0)
+            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
+          )
+          ELSE 0
+        END AS balance_credit,
+        'ZZZZZZZZZZ-GRAND-TOTAL' AS sort_order,
+        NULL AS dept_code
+    FROM accounts_in_scope ais
+    LEFT JOIN `tabGL Entry` gle
+      ON gle.account = ais.account
+     AND gle.docstatus = 1
+     AND IFNULL(gle.is_cancelled, 0) = 0
+     AND gle.company = %(company)s
+     AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+
 ) combined
-ORDER BY sort_order, transaction_date;
+ORDER BY (sort_order = 'ZZZZZZZZZZ-GRAND-TOTAL'), sort_order, transaction_date;
 """
 
 	return frappe.db.sql(sql, filters, as_dict=True)

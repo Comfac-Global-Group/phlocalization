@@ -1,5 +1,5 @@
 {
- "add_total_row": 0,
+ "add_total_row": 1,
  "add_translate_data": 0,
  "columns": [],
  "creation": "2026-05-19 23:43:14.082931",
@@ -10,7 +10,7 @@
  "idx": 0,
  "is_standard": "Yes",
  "letter_head": null,
- "modified": "2026-05-19 23:43:14.082931",
+ "modified": "2026-06-22 17:40:48.437816",
  "modified_by": "Administrator",
  "module": "Bureau of Internal Revenue",
  "name": "BIR Subsidiary Sales Journal",

@@ -1,0 +1,27 @@
+{
+ "doctype": "Report",
+ "name": "BIR Sales vs Cost",
+ "report_name": "BIR Sales vs Cost",
+ "module": "Bureau of Internal Revenue",
+ "ref_doctype": "Sales Invoice",
+ "report_type": "Script Report",
+ "is_standard": "Yes",
+ "disabled": 0,
+ "docstatus": 0,
+ "idx": 0,
+ "owner": "Administrator",
+ "modified_by": "Administrator",
+ "creation": "2026-06-19 14:01:35.284100",
+ "modified": "2026-06-19 14:01:35.284100",
+ "roles": [
+  {
+   "role": "Accounts User"
+  },
+  {
+   "role": "Accounts Manager"
+  },
+  {
+   "role": "Auditor"
+  }
+ ]
+}

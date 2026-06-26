@@ -21,9 +21,9 @@ def get_columns():
 	Return column definitions for the BIR Cash Receipts Transaction Prooflist.
 	"""
 	return [
-		{"fieldname": "transaction_date", "label": "Transaction Date", "fieldtype": "Date", "width": 100},
-		{"fieldname": "doc_type", "label": "Doc Type", "fieldtype": "Data", "width": 120},
-		{"fieldname": "doc_no_html", "label": "Doc No", "fieldtype": "HTML", "width": 140},
+		{"fieldname": "transaction_date", "label": "Transaction Date", "fieldtype": "Date", "width": 150},
+		{"fieldname": "doc_type", "label": "Doc Type", "fieldtype": "Data", "width": 180},
+		{"fieldname": "doc_no_html", "label": "Doc No", "fieldtype": "HTML", "width": 170},
 		{"fieldname": "bank_account", "label": "Bank Account", "fieldtype": "Data", "width": 260},
 		{"fieldname": "customer_name", "label": "Customer Name", "fieldtype": "Link", "options": "Customer", "width": 220},
 		{"fieldname": "reference_html", "label": "Reference", "fieldtype": "HTML", "width": 120},
@@ -163,12 +163,14 @@ def get_data(filters):
 						FROM `tabPayment Entry` pe
 						WHERE pe.name = gle.voucher_no
 					)
+					/* For Accounts Receivable (1301), pull the per-invoice description
+					   from the standard remarks field of the specific Sales Invoice tied
+					   to this GL line (gle.against_voucher), instead of GROUP_CONCAT-ing
+					   every reference in the voucher. */
 					WHEN a.account_number LIKE '1301%%' THEN (
-						SELECT GROUP_CONCAT(DISTINCT per.reference_name SEPARATOR '; ')
-						FROM `tabPayment Entry Reference` per
-						WHERE per.parent = gle.voucher_no
-							AND per.reference_name IS NOT NULL
-							AND per.reference_name != ''
+						SELECT COALESCE(si.remarks, '')
+						FROM `tabSales Invoice` si
+						WHERE si.name = gle.against_voucher
 					)
 					WHEN a.account_number LIKE '1604%%' THEN COALESCE(ped.description, '')
 					WHEN gle.voucher_type = 'Sales Invoice' THEN (
@@ -271,16 +273,32 @@ def get_data(filters):
 					ELSE gle.against_voucher
 				END AS ref_sort_key,
 
+				/* Sort key ensures each Accounts Receivable (1301) line is immediately
+				   followed by its matching Prepaid Tax (1604) line.
+
+				   Both line types share the same reference index (per.idx) of the
+				   underlying invoice:
+				     - 1301 lines resolve the index via gle.against_voucher.
+				     - 1604 (Prepaid Tax) lines have no against_voucher, so the index is
+				       resolved by matching the SOA token in the deduction description
+				       (e.g. 'SOA1760 (2 pct)' -> 'SOA1760') against the payment references.
+				   Within the same reference index, account 1301 ('01') sorts before
+				   account 1604 ('02'). */
 				CONCAT(
 					gle.posting_date, '-', gle.voucher_no, '-1-',
 					LPAD(
 						COALESCE(
 							CASE
 								WHEN a.account_number LIKE '1604%%' THEN (
-									SELECT p2.idx
-									FROM `tabPayment Entry Reference` p2
-									WHERE p2.parent = gle.voucher_no
-										AND p2.reference_name = gle.against_voucher
+									SELECT per.idx
+									FROM `tabPayment Entry Reference` per
+									WHERE per.parent = gle.voucher_no
+										AND COALESCE(ped.description, '') != ''
+										AND per.reference_name LIKE CONCAT(
+											'%%',
+											SUBSTRING_INDEX(ped.description, ' ', 1),
+											'%%'
+										)
 									LIMIT 1
 								)
 								ELSE (

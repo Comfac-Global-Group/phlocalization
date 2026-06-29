@@ -1,0 +1,39 @@
+name: Python Lint & Security Scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop, main, development]
+
+jobs:
+  lint:
+    name: Python Lint & Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff semgrep
+
+      - name: Get Changed Python Files
+        id: get_diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          echo "changed_files=$(git diff --name-only origin/${{ github.base_ref }} -- '*.py' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
+      - name: Run Ruff Lint Check
+        if: steps.get_diff.outputs.changed_files != ''
+        run: |
+          echo "Linting changed files: ${{ steps.get_diff.outputs.changed_files }}"
+          ruff check ${{ steps.get_diff.outputs.changed_files }}
+
+     

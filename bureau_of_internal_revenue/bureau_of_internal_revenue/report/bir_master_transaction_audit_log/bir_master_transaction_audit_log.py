@@ -5,6 +5,11 @@ import frappe
 
 
 def execute(filters=None):
+	"""
+  Entry point Frappe calls to render the report.
+	Returns a (columns, data) tuple based on the supplied filters.
+	Short-circuits to empty output when filters or data are missing.
+	"""
 	if not filters:
 		return [], []
 	columns = get_columns()
@@ -15,6 +20,11 @@ def execute(filters=None):
 
 
 def get_columns():
+	"""
+  Define the ordered list of column definitions for the report.
+	Each entry maps a field to its label, type, and display width.
+	The final four columns expose audit metadata (owner and timestamps).
+	"""
 	return [
 		{"label": "Account",               "fieldname": "account",           "fieldtype": "Link",         "options": "Account",      "width": 250},
 		{"label": "Cost Center",            "fieldname": "cost_center",       "fieldtype": "Link",         "options": "Cost Center",  "width": 160},
@@ -32,10 +42,19 @@ def get_columns():
 		{"label": "Credit (Net Change)",    "fieldname": "net_credit",        "fieldtype": "Currency",                                "width": 130},
 		{"label": "Debit (Balance)",        "fieldname": "balance_debit",     "fieldtype": "Currency",                                "width": 130},
 		{"label": "Credit (Balance)",       "fieldname": "balance_credit",    "fieldtype": "Currency",                                "width": 130},
+		{"label": "Owner",                  "fieldname": "owner",             "fieldtype": "Link",         "options": "User",         "width": 160},
+		{"label": "Creation Date",          "fieldname": "creation",          "fieldtype": "Datetime",                                "width": 160},
+		{"label": "Modified By",            "fieldname": "modified_by",       "fieldtype": "Link",         "options": "User",         "width": 160},
+		{"label": "Modified Time",          "fieldname": "modified",          "fieldtype": "Datetime",                                "width": 160},
 	]
 
 
 def get_data(filters):
+	"""
+  Build and run the SQL that assembles every report row.
+	Combines beginning balances, transaction details, subtotals, and totals.
+	Returns the query result as a list of dicts for the report engine.
+	"""
 	sql = """
 WITH
 accounts_with_txn AS (
@@ -90,7 +109,11 @@ SELECT
     net_debit,
     net_credit,
     balance_debit,
-    balance_credit
+    balance_credit,
+    owner,
+    creation,
+    modified_by,
+    modified
 FROM (
 
     /* ======== BEGINNING BALANCE ROW ======== */
@@ -111,6 +134,10 @@ FROM (
         NULL AS net_credit,
         NULL AS balance_debit,
         NULL AS balance_credit,
+        NULL AS owner,
+        NULL AS creation,
+        NULL AS modified_by,
+        NULL AS modified,
         CONCAT(gle.account, '-1') AS sort_order,
         NULL AS dept_code
     FROM `tabGL Entry` gle
@@ -269,6 +296,10 @@ FROM (
             )
             ELSE 0
         END AS balance_credit,
+        g.owner AS owner,
+        g.creation AS creation,
+        g.modified_by AS modified_by,
+        g.modified AS modified,
         CONCAT(
             g.account,
             '-2-',
@@ -392,6 +423,10 @@ FROM (
         CASE WHEN SUM(g.credit) - SUM(g.debit) > 0 THEN SUM(g.credit) - SUM(g.debit) ELSE 0 END AS net_credit,
         NULL AS balance_debit,
         NULL AS balance_credit,
+        NULL AS owner,
+        NULL AS creation,
+        NULL AS modified_by,
+        NULL AS modified,
         CONCAT(
             g.account,
             '-2-',
@@ -489,6 +524,10 @@ FROM (
           )
           ELSE 0
         END AS balance_credit,
+        NULL AS owner,
+        NULL AS creation,
+        NULL AS modified_by,
+        NULL AS modified,
         CONCAT(ais.account, '-3') AS sort_order,
         NULL AS dept_code
     FROM accounts_in_scope ais
@@ -507,6 +546,10 @@ FROM (
         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
         '' AS particulars,
         NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL AS owner,
+        NULL AS creation,
+        NULL AS modified_by,
+        NULL AS modified,
         CONCAT(ais.account, '-4') AS sort_order,
         NULL AS dept_code
     FROM accounts_in_scope ais
@@ -585,6 +628,10 @@ FROM (
           )
           ELSE 0
         END AS balance_credit,
+        NULL AS owner,
+        NULL AS creation,
+        NULL AS modified_by,
+        NULL AS modified,
         'ZZZZZZZZZZ-GRAND-TOTAL' AS sort_order,
         NULL AS dept_code
     FROM accounts_in_scope ais

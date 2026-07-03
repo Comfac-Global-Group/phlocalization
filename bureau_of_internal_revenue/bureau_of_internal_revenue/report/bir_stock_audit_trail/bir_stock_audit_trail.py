@@ -34,7 +34,8 @@ def get_columns():
 	"""
 	Return column definitions for the report grid.
 	Includes entry type, document link, JO number, item details,
-	quantity difference, costs, and status.
+	quantity difference, costs, and record audit metadata
+	(creation date, modified by, modified time, owner).
 	"""
 	return [
 		{"label": _("Entry Type"), "fieldname": "entry_type", "fieldtype": "Data", "width": 200},
@@ -52,7 +53,10 @@ def get_columns():
 		{"label": _("Quantity Difference"), "fieldname": "qty", "fieldtype": "Data", "width": 120},
 		{"label": _("Unit Cost"), "fieldname": "unit_cost", "fieldtype": "Data", "width": 110},
 		{"label": _("Total Cost"), "fieldname": "total_cost", "fieldtype": "Data", "width": 140},
-		{"label": _("Status"), "fieldname": "status", "fieldtype": "Data", "width": 100},
+		{"label": _("Created On"), "fieldname": "creation", "fieldtype": "Datetime", "width": 150},
+		{"label": _("Modified By"), "fieldname": "modified_by", "fieldtype": "Data", "width": 150},
+		{"label": _("Modified On"), "fieldname": "modified", "fieldtype": "Datetime", "width": 150},
+		{"label": _("Owner"), "fieldname": "owner", "fieldtype": "Data", "width": 150},
 	]
 
 
@@ -60,6 +64,9 @@ def get_data(filters):
 	"""
 	Build and execute the audit trail SQL query.
 	JO Number uses line-level project first: COALESCE(sed.project, se.project) and COALESCE(pri.project, pr.project). Stock Reconciliation has no project field so its jo_number is blank.
+	creation, modified_by, modified, and owner are taken from the parent transaction
+	document (Stock Entry / Stock Reconciliation / Purchase Receipt) so they reflect
+	when/by whom the transaction itself was created and last modified.
 	"""
 	params = {
 		"warehouse": filters.get("warehouse"),
@@ -98,7 +105,10 @@ def get_data(filters):
 				THEN CONCAT('<b>', FORMAT(total_cost, 2), '</b>')
 				ELSE FORMAT(total_cost, 2)
 			END AS total_cost,
-			status
+			creation,
+			modified_by,
+			modified,
+			owner
 		FROM (
 
 			/* ================================================
@@ -122,7 +132,10 @@ def get_data(filters):
 				audit_data.qty_diff AS qty,
 				audit_data.unit_cost,
 				audit_data.total_cost,
-				audit_data.status
+				audit_data.creation,
+				audit_data.modified_by,
+				audit_data.modified,
+				audit_data.owner
 			FROM (
 				/* 1) Stock Entry - Materials Requirement / Returns */
 				SELECT
@@ -150,12 +163,10 @@ def get_data(filters):
 					END AS qty_diff,
 					COALESCE(sed.valuation_rate, 0) AS unit_cost,
 					COALESCE(sed.transfer_qty * sed.valuation_rate, 0) AS total_cost,
-					CASE
-						WHEN se.docstatus = 0 THEN 'Draft'
-						WHEN se.docstatus = 1 THEN 'Submitted'
-						WHEN se.docstatus = 2 THEN 'Cancelled'
-						ELSE 'Unknown'
-					END AS status
+					se.creation,
+					se.modified_by,
+					se.modified,
+					se.owner
 				FROM `tabStock Entry` se
 				JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
 				LEFT JOIN `tabProject` p ON p.name = COALESCE(sed.project, se.project)
@@ -190,12 +201,10 @@ def get_data(filters):
 					COALESCE(sri.quantity_difference, 0) AS qty_diff,
 					COALESCE(sri.valuation_rate, 0) AS unit_cost,
 					COALESCE(sri.quantity_difference * sri.valuation_rate, 0) AS total_cost,
-					CASE
-						WHEN sr.docstatus = 0 THEN 'Draft'
-						WHEN sr.docstatus = 1 THEN 'Submitted'
-						WHEN sr.docstatus = 2 THEN 'Cancelled'
-						ELSE 'Unknown'
-					END AS status
+					sr.creation,
+					sr.modified_by,
+					sr.modified,
+					sr.owner
 				FROM `tabStock Reconciliation` sr
 				JOIN `tabStock Reconciliation Item` sri ON sri.parent = sr.name
 				LEFT JOIN `tabItem` i ON i.name = sri.item_code
@@ -226,12 +235,10 @@ def get_data(filters):
 					pri.qty AS qty_diff,
 					COALESCE(pri.valuation_rate, 0) AS unit_cost,
 					COALESCE(pri.stock_qty * pri.valuation_rate, 0) AS total_cost,
-					CASE
-						WHEN pr.docstatus = 0 THEN 'Draft'
-						WHEN pr.docstatus = 1 THEN 'Submitted'
-						WHEN pr.docstatus = 2 THEN 'Cancelled'
-						ELSE 'Unknown'
-					END AS status
+					pr.creation,
+					pr.modified_by,
+					pr.modified,
+					pr.owner
 				FROM `tabPurchase Receipt` pr
 				JOIN `tabPurchase Receipt Item` pri ON pri.parent = pr.name
 				WHERE
@@ -272,7 +279,10 @@ def get_data(filters):
 					ELSE NULL
 				END AS unit_cost,
 				SUM(audit_data.total_cost) AS total_cost,
-				NULL AS status
+				NULL AS creation,
+				NULL AS modified_by,
+				NULL AS modified,
+				NULL AS owner
 			FROM (
 				SELECT
 					CASE
@@ -360,7 +370,10 @@ def get_data(filters):
 				NULL AS qty,
 				NULL AS unit_cost,
 				NULL AS total_cost,
-				NULL AS status
+				NULL AS creation,
+				NULL AS modified_by,
+				NULL AS modified,
+				NULL AS owner
 			FROM (
 				SELECT DISTINCT jo_number
 				FROM (
@@ -444,7 +457,10 @@ def get_data(filters):
 					ELSE NULL
 				END AS unit_cost,
 				SUM(audit_data.total_cost) AS total_cost,
-				NULL AS status
+				NULL AS creation,
+				NULL AS modified_by,
+				NULL AS modified,
+				NULL AS owner
 			FROM (
 				SELECT
 					CASE

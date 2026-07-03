@@ -5,6 +5,10 @@ import frappe
 
 
 def execute(filters=None):
+	"""
+	Report entry point. Builds columns and fetches data for the given filters.
+	Returns (columns, data) for Frappe's query report framework.
+	"""
 	filters = filters or {}
 	columns = get_columns()
 	data = get_data(filters)
@@ -12,6 +16,10 @@ def execute(filters=None):
 
 
 def get_columns():
+	"""
+	Report entry point. Builds columns and fetches data for the given filters.
+	Returns (columns, data) for Frappe's query report framework.
+	"""
 	return [
 		{"label": "DOC TYPE", "fieldname": "DOC TYPE", "fieldtype": "Data", "width": 130},
 		{"label": "DOC NO", "fieldname": "DOC NO", "fieldtype": "Data", "width": 130},
@@ -23,10 +31,19 @@ def get_columns():
 		{"label": "CREDIT", "fieldname": "CREDIT", "fieldtype": "Data", "width": 120, "align": "right"},
 		{"label": "NET CHANGE", "fieldname": "NET CHANGE", "fieldtype": "Data", "width": 120, "align": "right"},
 		{"label": "JO NUMBER", "fieldname": "JO NUMBER", "fieldtype": "Data", "width": 130},
+		{"label": "Created On", "fieldname": "CREATION", "fieldtype": "Datetime", "width": 150},
+		{"label": "Modified By", "fieldname": "MODIFIED BY", "fieldtype": "Data", "width": 150},
+		{"label": "Modified On", "fieldname": "MODIFIED", "fieldtype": "Datetime", "width": 150},
+		{"label": "Owner", "fieldname": "OWNER", "fieldtype": "Data", "width": 150},
 	]
 
 
 def get_data(filters):
+	"""
+	Run the SQL query aggregating Stock Entries, Stock Reconciliations, Journal
+	Entries, and Purchase Invoices into a GL-style ledger with per-JO subtotals and
+	a report-wide footer. Takes filters (company, from_date, to_date); returns rows.
+	"""
 	query = """
 		WITH stock_entry_data AS (
 			SELECT
@@ -72,7 +89,11 @@ def get_data(filters):
 					ELSE 'OTHER'
 				END AS stock_subtype,
 				sed.project AS jo_number,
-				se.name AS doc_no_field
+				se.name AS doc_no_field,
+				se.creation AS creation,
+				se.modified_by AS modified_by,
+				se.modified AS modified,
+				se.owner AS owner
 			FROM `tabStock Entry` se
 			JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
 			WHERE se.docstatus = 1
@@ -112,7 +133,11 @@ def get_data(filters):
 				(gle.debit - gle.credit) AS net_change,
 				'RECON' AS stock_subtype,
 				gle.project AS jo_number,
-				sr.name AS doc_no_field
+				sr.name AS doc_no_field,
+				sr.creation AS creation,
+				sr.modified_by AS modified_by,
+				sr.modified AS modified,
+				sr.owner AS owner
 			FROM `tabGL Entry` gle
 			JOIN `tabStock Reconciliation` sr ON sr.name = gle.voucher_no
 			WHERE gle.company = %(company)s
@@ -142,7 +167,11 @@ def get_data(filters):
 				jea.party  AS party,
 				(jea.debit - jea.credit) AS net_change,
 				jea.project AS jo_number,
-				REPLACE(REPLACE(REPLACE(je.name,'ACC-JV-R-',''),'ACC-JV-A-',''),'ACC-JVP-','') AS doc_no_field
+				REPLACE(REPLACE(REPLACE(je.name,'ACC-JV-R-',''),'ACC-JV-A-',''),'ACC-JVP-','') AS doc_no_field,
+				je.creation AS creation,
+				je.modified_by AS modified_by,
+				je.modified AS modified,
+				je.owner AS owner
 			FROM `tabJournal Entry` je
 			JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
 			WHERE je.docstatus = 1
@@ -164,7 +193,11 @@ def get_data(filters):
 				pi.supplier AS party,
 				pii.base_amount AS net_change,
 				pii.project AS jo_number,
-				pi.remarks AS doc_no_field
+				pi.remarks AS doc_no_field,
+				pi.creation AS creation,
+				pi.modified_by AS modified_by,
+				pi.modified AS modified,
+				pi.owner AS owner
 			FROM `tabPurchase Invoice Item` pii
 			JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
 			WHERE pi.docstatus = 1
@@ -243,15 +276,18 @@ def get_data(filters):
 				1 AS block_order, j.jo_number, 1 AS section_order,
 				s.tran_date, s.doc_no_field, s.doc_type, s.reference,
 				s.payee_received_from, s.particulars,
-				s.debit, s.credit, s.net_change
+				s.debit, s.credit, s.net_change,
+				s.creation, s.modified_by, s.modified, s.owner
 			FROM all_jos j
 			JOIN (
 				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change
+					   payee_received_from, particulars, debit, credit, net_change,
+					   creation, modified_by, modified, owner
 				FROM stock_entry_data
 				UNION ALL
 				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change
+					   payee_received_from, particulars, debit, credit, net_change,
+					   creation, modified_by, modified, owner
 				FROM stock_reconciliation_data
 			) s ON s.jo_number = j.jo_number
 
@@ -261,7 +297,8 @@ def get_data(filters):
 			SELECT 1, j.jo_number, 2,
 				   NULL, NULL, '', NULL,
 				   'INVENTORY ENTRY TO GL', 'MR/MRS TOTAL:',
-				   m.net_change, NULL, NULL
+				   m.net_change, NULL, NULL,
+				   NULL, NULL, NULL, NULL
 			FROM all_jos j
 			JOIN mr_only_by_jo m ON m.jo_number = j.jo_number
 			WHERE COALESCE(m.net_change, 0) <> 0
@@ -272,7 +309,8 @@ def get_data(filters):
 			SELECT 1, j.jo_number, 3,
 				   NULL, NULL, '', NULL,
 				   'INVENTORY ENTRY TO GL', 'STOCK RECON TOTAL:',
-				   r.net_change, NULL, NULL
+				   r.net_change, NULL, NULL,
+				   NULL, NULL, NULL, NULL
 			FROM all_jos j
 			JOIN recon_by_jo r ON r.jo_number = j.jo_number
 			WHERE COALESCE(r.net_change, 0) <> 0
@@ -285,7 +323,8 @@ def get_data(filters):
 				   '<b>INVENTORY ENTRY TO GL</b>', '<b>OVER ALL TOTAL:</b>',
 				   COALESCE(m.net_change, 0),
 				   COALESCE(r.net_change, 0),
-				   COALESCE(s.net_change, 0)
+				   COALESCE(s.net_change, 0),
+				   NULL, NULL, NULL, NULL
 			FROM all_jos j
 			LEFT JOIN mr_only_by_jo m ON m.jo_number = j.jo_number
 			LEFT JOIN recon_by_jo    r ON r.jo_number = j.jo_number
@@ -300,15 +339,18 @@ def get_data(filters):
 			SELECT 1, j.jo_number, 5,
 				   c.tran_date, c.doc_no_field, c.doc_type, c.reference,
 				   c.payee_received_from, c.particulars,
-				   c.debit, c.credit, c.net_change
+				   c.debit, c.credit, c.net_change,
+				   c.creation, c.modified_by, c.modified, c.owner
 			FROM all_jos j
 			JOIN (
 				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change
+					   payee_received_from, particulars, debit, credit, net_change,
+					   creation, modified_by, modified, owner
 				FROM journal_entry_data
 				UNION ALL
 				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change
+					   payee_received_from, particulars, debit, credit, net_change,
+					   creation, modified_by, modified, owner
 				FROM purchase_invoice_data
 			) c ON c.jo_number = j.jo_number
 
@@ -318,7 +360,8 @@ def get_data(filters):
 			SELECT 1, j.jo_number, 6,
 				   NULL, NULL, '', NULL,
 				   NULL, 'TOTAL:',
-				   jp.debit, jp.credit, jp.net_change
+				   jp.debit, jp.credit, jp.net_change,
+				   NULL, NULL, NULL, NULL
 			FROM all_jos j
 			JOIN jepi_by_jo jp ON jp.jo_number = j.jo_number
 			WHERE COALESCE(jp.debit,0) <> 0
@@ -333,7 +376,8 @@ def get_data(filters):
 				   NULL, '<b>GRAND TOTAL:</b>',
 				   COALESCE(s.debit,0)  + COALESCE(jp.debit,0),
 				   COALESCE(s.credit,0) + COALESCE(jp.credit,0),
-				   COALESCE(s.net_change,0) + COALESCE(jp.net_change,0)
+				   COALESCE(s.net_change,0) + COALESCE(jp.net_change,0),
+				   NULL, NULL, NULL, NULL
 			FROM all_jos j
 			LEFT JOIN stock_by_jo s  ON s.jo_number  = j.jo_number
 			LEFT JOIN jepi_by_jo  jp ON jp.jo_number = j.jo_number
@@ -344,30 +388,33 @@ def get_data(filters):
 			UNION ALL
 
 			-- 8 & 9. Two blank separator rows
-			SELECT 1, j.jo_number, 8, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL FROM all_jos j
+			SELECT 1, j.jo_number, 8, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL FROM all_jos j
 			UNION ALL
-			SELECT 1, j.jo_number, 9, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL FROM all_jos j
+			SELECT 1, j.jo_number, 9, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL FROM all_jos j
 
 			-- ============ REPORT-WIDE FOOTER ============
 
 			UNION ALL
 			SELECT 2, NULL, 1, NULL, NULL, '', NULL,
 				   'INVENTORY ENTRY TO GL', 'MR/MRS TOTAL:',
-				   net_change, NULL, NULL
+				   net_change, NULL, NULL,
+				   NULL, NULL, NULL, NULL
 			FROM mr_mrs_total
 			WHERE COALESCE(net_change,0) <> 0
 
 			UNION ALL
 			SELECT 2, NULL, 2, NULL, NULL, '', NULL,
 				   'INVENTORY ENTRY TO GL', 'STOCK RECON TOTAL:',
-				   NULL, net_change, NULL
+				   NULL, net_change, NULL,
+				   NULL, NULL, NULL, NULL
 			FROM stock_recon_total
 			WHERE COALESCE(net_change,0) <> 0
 
 			UNION ALL
 			SELECT 2, NULL, 3, NULL, NULL, '', NULL,
 				   '<b>INVENTORY ENTRY TO GL</b>', '<b>OVER ALL TOTAL:</b>',
-				   COALESCE(m.net_change,0), COALESCE(r.net_change,0), COALESCE(gl.net_change,0)
+				   COALESCE(m.net_change,0), COALESCE(r.net_change,0), COALESCE(gl.net_change,0),
+				   NULL, NULL, NULL, NULL
 			FROM mr_mrs_total m CROSS JOIN stock_recon_total r CROSS JOIN stock_gl_total gl
 			WHERE COALESCE(m.net_change,0)  <> 0
 			   OR COALESCE(r.net_change,0)  <> 0
@@ -376,7 +423,8 @@ def get_data(filters):
 			UNION ALL
 			SELECT 2, NULL, 4, NULL, NULL, '', NULL,
 				   NULL, '<b>TOTAL:</b>',
-				   debit, credit, net_change
+				   debit, credit, net_change,
+				   NULL, NULL, NULL, NULL
 			FROM jepi_total
 			WHERE COALESCE(debit,0) <> 0
 			   OR COALESCE(credit,0) <> 0
@@ -387,7 +435,8 @@ def get_data(filters):
 				   NULL, '<b>GRAND TOTAL:</b>',
 				   COALESCE(gl.debit,0)  + COALESCE(jp.debit,0),
 				   COALESCE(gl.credit,0) + COALESCE(jp.credit,0),
-				   COALESCE(gl.net_change,0) + COALESCE(jp.net_change,0)
+				   COALESCE(gl.net_change,0) + COALESCE(jp.net_change,0),
+				   NULL, NULL, NULL, NULL
 			FROM stock_gl_total gl CROSS JOIN jepi_total jp
 			WHERE COALESCE(gl.debit,0)  + COALESCE(jp.debit,0)  <> 0
 			   OR COALESCE(gl.credit,0) + COALESCE(jp.credit,0) <> 0
@@ -421,7 +470,11 @@ def get_data(filters):
 			END AS `NET CHANGE`,
 			CASE WHEN r.block_order = 1 AND r.section_order IN (8,9) THEN NULL
 				 ELSE r.jo_number
-			END AS `JO NUMBER`
+			END AS `JO NUMBER`,
+			r.creation    AS `CREATION`,
+			r.modified_by AS `MODIFIED BY`,
+			r.modified    AS `MODIFIED`,
+			r.owner       AS `OWNER`
 		FROM all_rows r
 		ORDER BY
 			r.block_order,

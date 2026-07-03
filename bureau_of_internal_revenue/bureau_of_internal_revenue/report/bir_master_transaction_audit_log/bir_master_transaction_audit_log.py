@@ -463,7 +463,15 @@ FROM (
         NULL AS reference_no,
         NULL AS party,
         '<b>ACCOUNT TOTAL:</b>' AS particulars,
-        NULL AS beginning_balance,
+        COALESCE((
+            SELECT SUM(gle_bb.debit - gle_bb.credit)
+            FROM `tabGL Entry` gle_bb
+            WHERE gle_bb.docstatus = 1
+              AND IFNULL(gle_bb.is_cancelled, 0) = 0
+              AND gle_bb.company = %(company)s
+              AND gle_bb.posting_date < %(from_date)s
+              AND gle_bb.account = ais.account
+        ), 0) AS beginning_balance,
         COALESCE(SUM(gle.debit), 0) AS debit,
         COALESCE(SUM(gle.credit), 0) AS credit,
         CASE WHEN COALESCE(SUM(gle.debit) - SUM(gle.credit), 0) > 0
@@ -567,7 +575,15 @@ FROM (
         NULL AS reference_no,
         NULL AS party,
         '<b>GRAND TOTAL:</b>' AS particulars,
-        NULL AS beginning_balance,
+        COALESCE((
+            SELECT SUM(gle_bb.debit - gle_bb.credit)
+            FROM `tabGL Entry` gle_bb
+            WHERE gle_bb.docstatus = 1
+              AND IFNULL(gle_bb.is_cancelled, 0) = 0
+              AND gle_bb.company = %(company)s
+              AND gle_bb.posting_date < %(from_date)s
+              AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
+        ), 0) AS beginning_balance,
         COALESCE(SUM(gle.debit), 0) AS debit,
         COALESCE(SUM(gle.credit), 0) AS credit,
         CASE WHEN COALESCE(SUM(gle.debit) - SUM(gle.credit), 0) > 0

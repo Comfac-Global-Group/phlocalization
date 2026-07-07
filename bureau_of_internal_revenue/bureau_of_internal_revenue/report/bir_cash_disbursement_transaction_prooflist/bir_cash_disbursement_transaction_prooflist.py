@@ -142,7 +142,7 @@ def get_data(filters):
 
 	bank_account = (
 		frappe.qb.from_(pe2)
-		.join(a2).on(a2.name == pe2.paid_to)
+		.join(a2).on(a2.name == pe2.paid_from)
 		.select(Concat(a2.account_number, " - ", a2.account_name))
 		.where(pe2.name == gle.voucher_no)
 	)

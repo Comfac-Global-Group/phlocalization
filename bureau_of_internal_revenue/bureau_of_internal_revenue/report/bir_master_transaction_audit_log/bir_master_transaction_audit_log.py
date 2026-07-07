@@ -575,14 +575,15 @@ FROM (
         NULL AS reference_no,
         NULL AS party,
         '<b>GRAND TOTAL:</b>' AS particulars,
+        /* Beginning Balance grand total: sum of each account's pre-period net balance */
         COALESCE((
-            SELECT SUM(gle_bb.debit - gle_bb.credit)
-            FROM `tabGL Entry` gle_bb
-            WHERE gle_bb.docstatus = 1
-              AND IFNULL(gle_bb.is_cancelled, 0) = 0
-              AND gle_bb.company = %(company)s
-              AND gle_bb.posting_date < %(from_date)s
-              AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
+          SELECT SUM(gle_bb.debit - gle_bb.credit)
+          FROM `tabGL Entry` gle_bb
+          WHERE gle_bb.docstatus = 1
+            AND IFNULL(gle_bb.is_cancelled, 0) = 0
+            AND gle_bb.company = %(company)s
+            AND gle_bb.posting_date < %(from_date)s
+            AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
         ), 0) AS beginning_balance,
         COALESCE(SUM(gle.debit), 0) AS debit,
         COALESCE(SUM(gle.credit), 0) AS credit,
@@ -590,60 +591,70 @@ FROM (
              THEN COALESCE(SUM(gle.debit) - SUM(gle.credit), 0) ELSE 0 END AS net_debit,
         CASE WHEN COALESCE(SUM(gle.credit) - SUM(gle.debit), 0) > 0
              THEN COALESCE(SUM(gle.credit) - SUM(gle.debit), 0) ELSE 0 END AS net_credit,
-        CASE
-          WHEN (
-            COALESCE((
-              SELECT SUM(gle_bb.debit - gle_bb.credit)
-              FROM `tabGL Entry` gle_bb
-              WHERE gle_bb.docstatus = 1
-                AND IFNULL(gle_bb.is_cancelled, 0) = 0
-                AND gle_bb.company = %(company)s
-                AND gle_bb.posting_date < %(from_date)s
-                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
-            ), 0)
-            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
-          ) > 0
-          THEN (
-            COALESCE((
-              SELECT SUM(gle_bb.debit - gle_bb.credit)
-              FROM `tabGL Entry` gle_bb
-              WHERE gle_bb.docstatus = 1
-                AND IFNULL(gle_bb.is_cancelled, 0) = 0
-                AND gle_bb.company = %(company)s
-                AND gle_bb.posting_date < %(from_date)s
-                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
-            ), 0)
-            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
-          )
-          ELSE 0
-        END AS balance_debit,
-        CASE
-          WHEN (
-            COALESCE((
-              SELECT SUM(gle_bb.debit - gle_bb.credit)
-              FROM `tabGL Entry` gle_bb
-              WHERE gle_bb.docstatus = 1
-                AND IFNULL(gle_bb.is_cancelled, 0) = 0
-                AND gle_bb.company = %(company)s
-                AND gle_bb.posting_date < %(from_date)s
-                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
-            ), 0)
-            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
-          ) < 0
-          THEN ABS(
-            COALESCE((
-              SELECT SUM(gle_bb.debit - gle_bb.credit)
-              FROM `tabGL Entry` gle_bb
-              WHERE gle_bb.docstatus = 1
-                AND IFNULL(gle_bb.is_cancelled, 0) = 0
-                AND gle_bb.company = %(company)s
-                AND gle_bb.posting_date < %(from_date)s
-                AND gle_bb.account IN (SELECT account FROM accounts_in_scope)
-            ), 0)
-            + COALESCE(SUM(gle.debit), 0) - COALESCE(SUM(gle.credit), 0)
-          )
-          ELSE 0
-        END AS balance_credit,
+        /*
+          balance_debit grand total:
+            For each account, compute ending balance = BB + period net.
+            Sum only the positive ending balances (debit-normal accounts).
+        */
+        COALESCE((
+          SELECT SUM(acct_end.ending_balance)
+          FROM (
+            SELECT
+              ais2.account,
+              COALESCE((
+                SELECT SUM(bb.debit - bb.credit)
+                FROM `tabGL Entry` bb
+                WHERE bb.docstatus = 1
+                  AND IFNULL(bb.is_cancelled, 0) = 0
+                  AND bb.company = %(company)s
+                  AND bb.posting_date < %(from_date)s
+                  AND bb.account = ais2.account
+              ), 0)
+              + COALESCE((
+                SELECT SUM(pd.debit) - SUM(pd.credit)
+                FROM `tabGL Entry` pd
+                WHERE pd.docstatus = 1
+                  AND IFNULL(pd.is_cancelled, 0) = 0
+                  AND pd.company = %(company)s
+                  AND pd.posting_date BETWEEN %(from_date)s AND %(to_date)s
+                  AND pd.account = ais2.account
+              ), 0) AS ending_balance
+            FROM accounts_in_scope ais2
+          ) acct_end
+          WHERE acct_end.ending_balance > 0
+        ), 0) AS balance_debit,
+        /*
+          balance_credit grand total:
+            For each account, compute ending balance = BB + period net.
+            Sum ABS of the negative ending balances (credit-normal accounts).
+        */
+        COALESCE((
+          SELECT SUM(ABS(acct_end.ending_balance))
+          FROM (
+            SELECT
+              ais2.account,
+              COALESCE((
+                SELECT SUM(bb.debit - bb.credit)
+                FROM `tabGL Entry` bb
+                WHERE bb.docstatus = 1
+                  AND IFNULL(bb.is_cancelled, 0) = 0
+                  AND bb.company = %(company)s
+                  AND bb.posting_date < %(from_date)s
+                  AND bb.account = ais2.account
+              ), 0)
+              + COALESCE((
+                SELECT SUM(pd.debit) - SUM(pd.credit)
+                FROM `tabGL Entry` pd
+                WHERE pd.docstatus = 1
+                  AND IFNULL(pd.is_cancelled, 0) = 0
+                  AND pd.company = %(company)s
+                  AND pd.posting_date BETWEEN %(from_date)s AND %(to_date)s
+                  AND pd.account = ais2.account
+              ), 0) AS ending_balance
+            FROM accounts_in_scope ais2
+          ) acct_end
+          WHERE acct_end.ending_balance < 0
+        ), 0) AS balance_credit,
         NULL AS owner,
         NULL AS creation,
         NULL AS modified_by,

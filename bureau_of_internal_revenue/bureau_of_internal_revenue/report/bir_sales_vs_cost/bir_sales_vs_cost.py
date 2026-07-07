@@ -15,7 +15,8 @@ def get_columns():
 		{"fieldname": "proj",               "label": "PROJECT ID",            "fieldtype": "Link", "options": "Project",      "width": 160},
 		{"fieldname": "sales_order",        "label": "S.O. No.",              "fieldtype": "Link", "options": "Sales Order",  "width": 150},
 		{"fieldname": "department",         "label": "DEPARTMENT",            "fieldtype": "Link", "options": "Department",   "width": 370},
-		{"fieldname": "customer",           "label": "CUSTOMER",              "fieldtype": "Link", "options": "Customer",     "width": 300},
+		{"fieldname": "customer",           "label": "CUSTOMER",              "fieldtype": "Link", "options": "Customer",     "width": 160},
+		{"fieldname": "customer_name",      "label": "CUSTOMER NAME",         "fieldtype": "Data",                            "width": 280},
 		{"fieldname": "remarks_html",       "label": "SALES INVOICE REMARKS", "fieldtype": "HTML",                            "width": 200},
 		{"fieldname": "description",        "label": "DESCRIPTION",           "fieldtype": "Data",                            "width": 300},
 		{"fieldname": "sales_html",         "label": "SALES",                 "fieldtype": "HTML",                            "width": 180},
@@ -42,6 +43,7 @@ def get_data(filters):
 				p.sales_order                           AS sales_order,
 				p.department                            AS department,
 				p.customer                              AS customer,
+				cust.customer_name                      AS customer_name,
 				si.remarks_html                         AS remarks_html,
 				si.si_item_descriptions                 AS description,
 				COALESCE(si.si_items_total_base, 0)     AS sales,
@@ -151,6 +153,8 @@ def get_data(filters):
 				GROUP BY COALESCE(NULLIF(gle.project, ''), '<<NO PROJECT>>')
 			) actual_cos ON actual_cos.project = p.name
 
+			LEFT JOIN `tabCustomer` cust ON cust.name = p.customer
+
 			WHERE p.company = %(company)s
 			  AND ( %(project)s = '' OR p.name LIKE %(project)s )
 			  AND IF(%(invoice_filter)s = 'With Invoices', si.si_name_flag IS NOT NULL, 1=1)
@@ -166,14 +170,14 @@ def get_data(filters):
 		)
 
 		SELECT
-			proj, sales_order, department, customer,
+			proj, sales_order, department, customer, customer_name,
 			remarks_html, description,
 			sales_html, actual_cos_html, accrued_cos_html,
 			cost_of_sales_html, cost_pct_html
 		FROM (
 
 			SELECT
-				proj, sales_order, department, customer,
+				proj, sales_order, department, customer, customer_name,
 				remarks_html, description,
 				CONCAT('₱ ', FORMAT(sales, 2))         AS sales_html,
 				CONCAT('₱ ', FORMAT(actual_cos, 2))    AS actual_cos_html,
@@ -189,7 +193,7 @@ def get_data(filters):
 
 			UNION ALL
 			SELECT
-				NULL, NULL, NULL, NULL,
+				NULL, NULL, NULL, NULL, NULL,
 				'<b>SUBTOTAL</b>',
 				NULL,
 				CONCAT('<b>₱ ', FORMAT(COALESCE(SUM(sales), 0), 2),              '</b>'),
@@ -205,12 +209,12 @@ def get_data(filters):
 
 			UNION ALL
 			SELECT
-				NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+				NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 				3, ''
 
 			UNION ALL
 			SELECT
-				NULL, NULL, NULL, NULL,
+				NULL, NULL, NULL, NULL, NULL,
 				'PAYROLL',
 				CONCAT('COS - OVERHEAD (',
 					   UPPER(SUBSTRING(MONTHNAME(%(from_date)s), 1, 2)),
@@ -236,7 +240,7 @@ def get_data(filters):
 
 			UNION ALL
 			SELECT
-				NULL, NULL, NULL, NULL,
+				NULL, NULL, NULL, NULL, NULL,
 				'<b>GRAND TOTAL</b>',
 				NULL,
 				CONCAT('<b>₱ ', FORMAT(COALESCE(t.total_sales, 0), 2), '</b>'),

@@ -16,10 +16,6 @@ def execute(filters=None):
 
 
 def get_columns():
-	"""
-	Report entry point. Builds columns and fetches data for the given filters.
-	Returns (columns, data) for Frappe's query report framework.
-	"""
 	return [
 		{"label": "DOC TYPE", "fieldname": "DOC TYPE", "fieldtype": "Data", "width": 130},
 		{"label": "DOC NO", "fieldname": "DOC NO", "fieldtype": "Data", "width": 130},
@@ -31,6 +27,7 @@ def get_columns():
 		{"label": "CREDIT", "fieldname": "CREDIT", "fieldtype": "Data", "width": 120, "align": "right"},
 		{"label": "NET CHANGE", "fieldname": "NET CHANGE", "fieldtype": "Data", "width": 120, "align": "right"},
 		{"label": "JO NUMBER", "fieldname": "JO NUMBER", "fieldtype": "Data", "width": 130},
+		{"label": "Status", "fieldname": "status", "fieldtype": "Data", "width": 130},
 		{"label": "Created On", "fieldname": "CREATION", "fieldtype": "Datetime", "width": 150},
 		{"label": "Modified By", "fieldname": "MODIFIED BY", "fieldtype": "Data", "width": 150},
 		{"label": "Modified On", "fieldname": "MODIFIED", "fieldtype": "Datetime", "width": 150},
@@ -40,409 +37,11 @@ def get_columns():
 
 def get_data(filters):
 	"""
-	Run the SQL query aggregating Stock Entries, Stock Reconciliations, Journal
-	Entries, and Purchase Invoices into a GL-style ledger with per-JO subtotals and
-	a report-wide footer. Takes filters (company, from_date, to_date); returns rows.
+	Run the SQL query aggregating Stock Entries, Journal Entries, and Purchase
+	Invoices into a GL-style ledger with per-JO subtotals and a report-wide footer.
+	Takes filters (company, from_date, to_date, status); returns rows.
 	"""
 	query = """
-		WITH stock_entry_data AS (
-			SELECT
-				se.name AS erp_doc_no,
-				CASE
-					WHEN se.stock_entry_type = 'Material Transfer' THEN
-						CASE
-							WHEN COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN 'MR'
-							ELSE 'MRS'
-						END
-					ELSE se.stock_entry_type
-				END AS doc_type,
-				se.posting_date AS tran_date,
-				(SELECT p.customer FROM `tabProject` p WHERE p.name = se.project LIMIT 1) AS reference,
-				CONCAT('Item#', sed.item_code, ': ', COALESCE(sed.description, ''), ' - ', sed.qty, ' PC') AS particulars,
-				'INVENTORY ENTRY TO GL' AS payee_received_from,
-				CASE
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN sed.amount
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN 0
-					ELSE sed.amount
-				END AS debit,
-				CASE
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN 0
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN sed.amount
-					ELSE 0
-				END AS credit,
-				CASE
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN sed.amount
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN -sed.amount
-					ELSE sed.amount
-				END AS net_change,
-				CASE
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN 'MR'
-					WHEN se.stock_entry_type = 'Material Transfer'
-					 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN 'MRS'
-					ELSE 'OTHER'
-				END AS stock_subtype,
-				sed.project AS jo_number,
-				se.name AS doc_no_field,
-				se.creation AS creation,
-				se.modified_by AS modified_by,
-				se.modified AS modified,
-				se.owner AS owner
-			FROM `tabStock Entry` se
-			JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
-			WHERE se.docstatus = 1
-			  AND se.company = %(company)s
-			  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			  AND sed.project IS NOT NULL
-		),
-
-		stock_reconciliation_data AS (
-			SELECT
-				sr.name AS erp_doc_no,
-				'Stock Reconciliation' AS doc_type,
-				gle.posting_date AS tran_date,
-				NULL AS reference,
-				CASE
-					WHEN (SELECT COUNT(*) FROM `tabStock Reconciliation Item` sri
-						  WHERE sri.parent = gle.voucher_no) > 0 THEN
-						CONCAT(
-							'Item#',
-							(SELECT sri.item_code FROM `tabStock Reconciliation Item` sri
-							 WHERE sri.parent = gle.voucher_no LIMIT 1),
-							': ',
-							COALESCE(
-								(SELECT it.item_name FROM `tabStock Reconciliation Item` sri
-								 JOIN `tabItem` it ON it.name = sri.item_code
-								 WHERE sri.parent = gle.voucher_no LIMIT 1),
-								''),
-							' - ',
-							(SELECT sri.qty FROM `tabStock Reconciliation Item` sri
-							 WHERE sri.parent = gle.voucher_no LIMIT 1),
-							' PC')
-					ELSE COALESCE(gle.remarks, 'Stock Reconciliation Adjustment')
-				END AS particulars,
-				'INVENTORY ENTRY TO GL' AS payee_received_from,
-				gle.debit AS debit,
-				gle.credit AS credit,
-				(gle.debit - gle.credit) AS net_change,
-				'RECON' AS stock_subtype,
-				gle.project AS jo_number,
-				sr.name AS doc_no_field,
-				sr.creation AS creation,
-				sr.modified_by AS modified_by,
-				sr.modified AS modified,
-				sr.owner AS owner
-			FROM `tabGL Entry` gle
-			JOIN `tabStock Reconciliation` sr ON sr.name = gle.voucher_no
-			WHERE gle.company = %(company)s
-			  AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			  AND gle.voucher_type = 'Stock Reconciliation'
-			  AND gle.account LIKE '1521%%'
-			  AND gle.project IS NOT NULL
-		),
-
-		journal_entry_data AS (
-			SELECT
-				je.name AS erp_doc_no,
-				je.voucher_type AS doc_type,
-				je.posting_date AS tran_date,
-				je.user_remark AS reference,
-				jea.user_remark AS particulars,
-				CASE
-					WHEN je.user_remark LIKE '%%SA#%%'      THEN je.pay_to_recd_from
-					WHEN je.user_remark LIKE '%%COS%%'      THEN 'CLOSED TO COS'
-					WHEN je.user_remark LIKE '%%VP-ALPHA%%' THEN 'ADJUSTMENT TO COS'
-					WHEN je.user_remark LIKE '%%INV%%'      THEN 'CLOSED TO COS'
-					WHEN je.user_remark LIKE '%%VP#%%'      THEN jea.party
-					ELSE jea.party
-				END AS payee_received_from,
-				jea.debit  AS debit,
-				jea.credit AS credit,
-				jea.party  AS party,
-				(jea.debit - jea.credit) AS net_change,
-				jea.project AS jo_number,
-				REPLACE(REPLACE(REPLACE(je.name,'ACC-JV-R-',''),'ACC-JV-A-',''),'ACC-JVP-','') AS doc_no_field,
-				je.creation AS creation,
-				je.modified_by AS modified_by,
-				je.modified AS modified,
-				je.owner AS owner
-			FROM `tabJournal Entry` je
-			JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
-			WHERE je.docstatus = 1
-			  AND je.company = %(company)s
-			  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			  AND jea.project IS NOT NULL
-		),
-
-		purchase_invoice_data AS (
-			SELECT
-				pi.name AS erp_doc_no,
-				'Purchase Invoice' AS doc_type,
-				pi.posting_date AS tran_date,
-				CONCAT(COALESCE(pii.item_code,''),' ',COALESCE(pii.item_name,'')) AS reference,
-				COALESCE(pii.description, pii.item_name, '') AS particulars,
-				pi.supplier AS payee_received_from,
-				pii.base_amount AS debit,
-				0 AS credit,
-				pi.supplier AS party,
-				pii.base_amount AS net_change,
-				pii.project AS jo_number,
-				pi.remarks AS doc_no_field,
-				pi.creation AS creation,
-				pi.modified_by AS modified_by,
-				pi.modified AS modified,
-				pi.owner AS owner
-			FROM `tabPurchase Invoice Item` pii
-			JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
-			WHERE pi.docstatus = 1
-			  AND pi.company = %(company)s
-			  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			  AND pii.expense_account LIKE '1521%%'
-			  AND pii.project IS NOT NULL
-		),
-
-		all_jos AS (
-			SELECT jo_number FROM stock_entry_data           WHERE jo_number IS NOT NULL
-			UNION
-			SELECT jo_number FROM stock_reconciliation_data  WHERE jo_number IS NOT NULL
-			UNION
-			SELECT jo_number FROM journal_entry_data         WHERE jo_number IS NOT NULL
-			UNION
-			SELECT jo_number FROM purchase_invoice_data      WHERE jo_number IS NOT NULL
-		),
-
-		mr_only_by_jo AS (
-			SELECT jo_number, SUM(net_change) AS net_change
-			FROM stock_entry_data WHERE stock_subtype IN ('MR','MRS')
-			GROUP BY jo_number
-		),
-		recon_by_jo AS (
-			SELECT jo_number, SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
-			FROM stock_reconciliation_data GROUP BY jo_number
-		),
-		stock_by_jo AS (
-			SELECT jo_number, SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
-			FROM (
-				SELECT jo_number, debit, credit, net_change FROM stock_entry_data
-				UNION ALL
-				SELECT jo_number, debit, credit, net_change FROM stock_reconciliation_data
-			) x GROUP BY jo_number
-		),
-		jepi_by_jo AS (
-			SELECT jo_number, SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
-			FROM (
-				SELECT jo_number, debit, credit, net_change FROM journal_entry_data
-				UNION ALL
-				SELECT jo_number, debit, credit, net_change FROM purchase_invoice_data
-			) x GROUP BY jo_number
-		),
-
-		mr_mrs_total AS (
-			SELECT SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
-			FROM stock_entry_data WHERE stock_subtype IN ('MR','MRS')
-		),
-		stock_recon_total AS (
-			SELECT SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
-			FROM stock_reconciliation_data
-		),
-		stock_gl_total AS (
-			SELECT SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
-			FROM (
-				SELECT debit, credit, net_change FROM stock_entry_data
-				UNION ALL
-				SELECT debit, credit, net_change FROM stock_reconciliation_data
-			) x
-		),
-		jepi_total AS (
-			SELECT SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
-			FROM (
-				SELECT debit, credit, net_change FROM journal_entry_data
-				UNION ALL
-				SELECT debit, credit, net_change FROM purchase_invoice_data
-			) x
-		),
-
-		all_rows AS (
-			-- ============ PER-JO BLOCK ============
-
-			-- 1. Stock detail rows
-			SELECT
-				1 AS block_order, j.jo_number, 1 AS section_order,
-				s.tran_date, s.doc_no_field, s.doc_type, s.reference,
-				s.payee_received_from, s.particulars,
-				s.debit, s.credit, s.net_change,
-				s.creation, s.modified_by, s.modified, s.owner
-			FROM all_jos j
-			JOIN (
-				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change,
-					   creation, modified_by, modified, owner
-				FROM stock_entry_data
-				UNION ALL
-				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change,
-					   creation, modified_by, modified, owner
-				FROM stock_reconciliation_data
-			) s ON s.jo_number = j.jo_number
-
-			UNION ALL
-
-			-- 2. MR/MRS TOTAL:  (skip if 0)
-			SELECT 1, j.jo_number, 2,
-				   NULL, NULL, '', NULL,
-				   'INVENTORY ENTRY TO GL', 'MR/MRS TOTAL:',
-				   m.net_change, NULL, NULL,
-				   NULL, NULL, NULL, NULL
-			FROM all_jos j
-			JOIN mr_only_by_jo m ON m.jo_number = j.jo_number
-			WHERE COALESCE(m.net_change, 0) <> 0
-
-			UNION ALL
-
-			-- 3. STOCK RECON TOTAL:  (skip if 0)
-			SELECT 1, j.jo_number, 3,
-				   NULL, NULL, '', NULL,
-				   'INVENTORY ENTRY TO GL', 'STOCK RECON TOTAL:',
-				   r.net_change, NULL, NULL,
-				   NULL, NULL, NULL, NULL
-			FROM all_jos j
-			JOIN recon_by_jo r ON r.jo_number = j.jo_number
-			WHERE COALESCE(r.net_change, 0) <> 0
-
-			UNION ALL
-
-			-- 4. OVER ALL TOTAL:  (bold, skip if all zero)
-			SELECT 1, j.jo_number, 4,
-				   NULL, NULL, '', NULL,
-				   '<b>INVENTORY ENTRY TO GL</b>', '<b>OVER ALL TOTAL:</b>',
-				   COALESCE(m.net_change, 0),
-				   COALESCE(r.net_change, 0),
-				   COALESCE(s.net_change, 0),
-				   NULL, NULL, NULL, NULL
-			FROM all_jos j
-			LEFT JOIN mr_only_by_jo m ON m.jo_number = j.jo_number
-			LEFT JOIN recon_by_jo    r ON r.jo_number = j.jo_number
-			LEFT JOIN stock_by_jo    s ON s.jo_number = j.jo_number
-			WHERE COALESCE(m.net_change,0) <> 0
-			   OR COALESCE(r.net_change,0) <> 0
-			   OR COALESCE(s.net_change,0) <> 0
-
-			UNION ALL
-
-			-- 5. JE/PI detail rows
-			SELECT 1, j.jo_number, 5,
-				   c.tran_date, c.doc_no_field, c.doc_type, c.reference,
-				   c.payee_received_from, c.particulars,
-				   c.debit, c.credit, c.net_change,
-				   c.creation, c.modified_by, c.modified, c.owner
-			FROM all_jos j
-			JOIN (
-				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change,
-					   creation, modified_by, modified, owner
-				FROM journal_entry_data
-				UNION ALL
-				SELECT jo_number, tran_date, doc_no_field, doc_type, reference,
-					   payee_received_from, particulars, debit, credit, net_change,
-					   creation, modified_by, modified, owner
-				FROM purchase_invoice_data
-			) c ON c.jo_number = j.jo_number
-
-			UNION ALL
-
-			-- 6. TOTAL:  (JE/PI subtotal, skip if all zero)
-			SELECT 1, j.jo_number, 6,
-				   NULL, NULL, '', NULL,
-				   NULL, 'TOTAL:',
-				   jp.debit, jp.credit, jp.net_change,
-				   NULL, NULL, NULL, NULL
-			FROM all_jos j
-			JOIN jepi_by_jo jp ON jp.jo_number = j.jo_number
-			WHERE COALESCE(jp.debit,0) <> 0
-			   OR COALESCE(jp.credit,0) <> 0
-			   OR COALESCE(jp.net_change,0) <> 0
-
-			UNION ALL
-
-			-- 7. GRAND TOTAL: per JO (bold, skip if all zero)
-			SELECT 1, j.jo_number, 7,
-				   NULL, NULL, '', NULL,
-				   NULL, '<b>GRAND TOTAL:</b>',
-				   COALESCE(s.debit,0)  + COALESCE(jp.debit,0),
-				   COALESCE(s.credit,0) + COALESCE(jp.credit,0),
-				   COALESCE(s.net_change,0) + COALESCE(jp.net_change,0),
-				   NULL, NULL, NULL, NULL
-			FROM all_jos j
-			LEFT JOIN stock_by_jo s  ON s.jo_number  = j.jo_number
-			LEFT JOIN jepi_by_jo  jp ON jp.jo_number = j.jo_number
-			WHERE COALESCE(s.debit,0)  + COALESCE(jp.debit,0)  <> 0
-			   OR COALESCE(s.credit,0) + COALESCE(jp.credit,0) <> 0
-			   OR COALESCE(s.net_change,0) + COALESCE(jp.net_change,0) <> 0
-
-			UNION ALL
-
-			-- 8 & 9. Two blank separator rows
-			SELECT 1, j.jo_number, 8, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL FROM all_jos j
-			UNION ALL
-			SELECT 1, j.jo_number, 9, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL FROM all_jos j
-
-			-- ============ REPORT-WIDE FOOTER ============
-
-			UNION ALL
-			SELECT 2, NULL, 1, NULL, NULL, '', NULL,
-				   'INVENTORY ENTRY TO GL', 'MR/MRS TOTAL:',
-				   net_change, NULL, NULL,
-				   NULL, NULL, NULL, NULL
-			FROM mr_mrs_total
-			WHERE COALESCE(net_change,0) <> 0
-
-			UNION ALL
-			SELECT 2, NULL, 2, NULL, NULL, '', NULL,
-				   'INVENTORY ENTRY TO GL', 'STOCK RECON TOTAL:',
-				   NULL, net_change, NULL,
-				   NULL, NULL, NULL, NULL
-			FROM stock_recon_total
-			WHERE COALESCE(net_change,0) <> 0
-
-			UNION ALL
-			SELECT 2, NULL, 3, NULL, NULL, '', NULL,
-				   '<b>INVENTORY ENTRY TO GL</b>', '<b>OVER ALL TOTAL:</b>',
-				   COALESCE(m.net_change,0), COALESCE(r.net_change,0), COALESCE(gl.net_change,0),
-				   NULL, NULL, NULL, NULL
-			FROM mr_mrs_total m CROSS JOIN stock_recon_total r CROSS JOIN stock_gl_total gl
-			WHERE COALESCE(m.net_change,0)  <> 0
-			   OR COALESCE(r.net_change,0)  <> 0
-			   OR COALESCE(gl.net_change,0) <> 0
-
-			UNION ALL
-			SELECT 2, NULL, 4, NULL, NULL, '', NULL,
-				   NULL, '<b>TOTAL:</b>',
-				   debit, credit, net_change,
-				   NULL, NULL, NULL, NULL
-			FROM jepi_total
-			WHERE COALESCE(debit,0) <> 0
-			   OR COALESCE(credit,0) <> 0
-			   OR COALESCE(net_change,0) <> 0
-
-			UNION ALL
-			SELECT 2, NULL, 5, NULL, NULL, '', NULL,
-				   NULL, '<b>GRAND TOTAL:</b>',
-				   COALESCE(gl.debit,0)  + COALESCE(jp.debit,0),
-				   COALESCE(gl.credit,0) + COALESCE(jp.credit,0),
-				   COALESCE(gl.net_change,0) + COALESCE(jp.net_change,0),
-				   NULL, NULL, NULL, NULL
-			FROM stock_gl_total gl CROSS JOIN jepi_total jp
-			WHERE COALESCE(gl.debit,0)  + COALESCE(jp.debit,0)  <> 0
-			   OR COALESCE(gl.credit,0) + COALESCE(jp.credit,0) <> 0
-			   OR COALESCE(gl.net_change,0) + COALESCE(jp.net_change,0) <> 0
-		)
-
 		SELECT
 			r.doc_type            AS `DOC TYPE`,
 			r.doc_no_field        AS `DOC NO`,
@@ -450,32 +49,669 @@ def get_data(filters):
 			r.tran_date           AS `TRAN DATE`,
 			r.payee_received_from AS `PAYEE/RECEIVED FROM`,
 			r.particulars         AS `PARTICULARS`,
-			CASE WHEN r.debit      IS NOT NULL THEN
-				CASE WHEN r.section_order IN (4,6,7) OR (r.block_order = 2 AND r.section_order IN (3,4,5))
-				THEN CONCAT('<b>', FORMAT(r.debit, 2), '</b>')
+			CASE WHEN r.debit IS NOT NULL THEN
+				CASE WHEN r.section_order IN (4,6,7)
+					  OR (r.block_order = 2 AND r.section_order IN (3,4,5))
+					 THEN CONCAT('<b>', FORMAT(r.debit, 2), '</b>')
 					 ELSE FORMAT(r.debit, 2)
 				END
 			END AS `DEBIT`,
-			CASE WHEN r.credit     IS NOT NULL THEN
-				CASE WHEN r.section_order IN (4,6,7) OR (r.block_order = 2 AND r.section_order IN (3,4,5))
-				THEN CONCAT('<b>', FORMAT(r.credit, 2), '</b>')
+			CASE WHEN r.credit IS NOT NULL THEN
+				CASE WHEN r.section_order IN (4,6,7)
+					  OR (r.block_order = 2 AND r.section_order IN (3,4,5))
+					 THEN CONCAT('<b>', FORMAT(r.credit, 2), '</b>')
 					 ELSE FORMAT(r.credit, 2)
 				END
 			END AS `CREDIT`,
 			CASE WHEN r.net_change IS NOT NULL THEN
-				CASE WHEN r.section_order IN (4,6,7) OR (r.block_order = 2 AND r.section_order IN (3,4,5))
-				THEN CONCAT('<b>', FORMAT(r.net_change, 2), '</b>')
+				CASE WHEN r.section_order IN (4,6,7)
+					  OR (r.block_order = 2 AND r.section_order IN (3,4,5))
+					 THEN CONCAT('<b>', FORMAT(r.net_change, 2), '</b>')
 					 ELSE FORMAT(r.net_change, 2)
 				END
 			END AS `NET CHANGE`,
 			CASE WHEN r.block_order = 1 AND r.section_order IN (8,9) THEN NULL
 				 ELSE r.jo_number
 			END AS `JO NUMBER`,
-			r.creation    AS `CREATION`,
-			r.modified_by AS `MODIFIED BY`,
-			r.modified    AS `MODIFIED`,
-			r.owner       AS `OWNER`
-		FROM all_rows r
+			r.status_label AS `status`,
+			r.creation     AS `CREATION`,
+			r.modified_by  AS `MODIFIED BY`,
+			r.modified     AS `MODIFIED`,
+			r.owner        AS `OWNER`
+		FROM (
+			/* ══════════════════════════════════════════════════════
+			   §1  STOCK DETAIL ROWS
+			══════════════════════════════════════════════════════ */
+			SELECT
+				1 AS block_order, j.jo_number, 1 AS section_order,
+				s.tran_date, s.doc_no_field, s.doc_type, s.reference,
+				s.payee_received_from, s.particulars,
+				s.debit, s.credit, s.net_change, s.status_label AS status_label,
+				s.creation, s.modified_by, s.modified, s.owner
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se
+					JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project AS jo_number
+					FROM `tabJournal Entry` je
+					JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND jea.project IS NOT NULL
+					  AND jea.account LIKE '1521%%'
+					UNION
+					SELECT pii.project AS jo_number
+					FROM `tabPurchase Invoice Item` pii
+					JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND pii.expense_account LIKE '1521%%'
+				) all_jo_src WHERE jo_number IS NOT NULL
+			) j
+			JOIN (
+				SELECT
+					COALESCE(sed.project, se.project) AS jo_number,
+					se.posting_date AS tran_date,
+					se.name AS doc_no_field,
+					CASE
+						WHEN se.stock_entry_type = 'Material Transfer' THEN
+							CASE WHEN COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN 'MR' ELSE 'MRS' END
+						ELSE se.stock_entry_type
+					END AS doc_type,
+					(SELECT p.customer FROM `tabProject` p
+					 WHERE p.name = COALESCE(sed.project, se.project) LIMIT 1) AS reference,
+					'INVENTORY ENTRY TO GL' AS payee_received_from,
+					CONCAT('Item#', sed.item_code, ': ', COALESCE(sed.description, ''), ' - ', sed.qty, ' PC') AS particulars,
+					CASE
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN sed.amount
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN 0
+						ELSE sed.amount
+					END AS debit,
+					CASE
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN 0
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN sed.amount
+						ELSE 0
+					END AS credit,
+					CASE
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN sed.amount
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN -sed.amount
+						ELSE sed.amount
+					END AS net_change,
+					CASE WHEN se.docstatus = 2 THEN 'Cancelled' ELSE 'Submitted' END AS status_label,
+					se.creation AS creation, se.modified_by AS modified_by,
+					se.modified AS modified, se.owner AS owner
+				FROM `tabStock Entry` se
+				JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+				WHERE se.docstatus IN (1, 2)
+				  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+					   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+					   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+				  AND se.company = %(company)s
+				  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				  AND COALESCE(sed.project, se.project) IS NOT NULL
+			) s ON s.jo_number = j.jo_number
+			UNION ALL
+			/* ══════════════════════════════════════════════════════
+			   §2  MR/MRS TOTAL per JO
+			══════════════════════════════════════════════════════ */
+			SELECT 1, j.jo_number, 2,
+				   NULL, NULL, '', NULL,
+				   'INVENTORY ENTRY TO GL', 'MR/MRS TOTAL:',
+				   m.net_change, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					UNION
+					SELECT pii.project FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) src WHERE jo_number IS NOT NULL
+			) j
+			JOIN (
+				SELECT
+					COALESCE(sed.project, se.project) AS jo_number,
+					SUM(CASE
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN sed.amount
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN -sed.amount
+						ELSE sed.amount
+					END) AS net_change
+				FROM `tabStock Entry` se
+				JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+				WHERE se.docstatus = 1
+				  AND se.company = %(company)s
+				  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				  AND COALESCE(sed.project, se.project) IS NOT NULL
+				  AND CASE
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') LIKE 'Stores%%' THEN 'MR'
+						WHEN se.stock_entry_type = 'Material Transfer'
+						 AND COALESCE(sed.s_warehouse, '') NOT LIKE 'Stores%%' THEN 'MRS'
+						ELSE 'OTHER'
+					  END IN ('MR','MRS')
+				GROUP BY COALESCE(sed.project, se.project)
+			) m ON m.jo_number = j.jo_number
+			WHERE COALESCE(m.net_change, 0) <> 0
+			UNION ALL
+			/* ══════════════════════════════════════════════════════
+			   §3  OVER ALL TOTAL per JO  (Stock Entries only)
+			══════════════════════════════════════════════════════ */
+			SELECT 1, j.jo_number, 4,
+				   NULL, NULL, '', NULL,
+				   '<b>INVENTORY ENTRY TO GL</b>', '<b>OVER ALL TOTAL:</b>',
+				   COALESCE(m.net_change, 0),
+				   NULL,
+				   COALESCE(s.net_change, 0),
+				   NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					UNION
+					SELECT pii.project FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) src WHERE jo_number IS NOT NULL
+			) j
+			LEFT JOIN (
+				SELECT COALESCE(sed.project, se.project) AS jo_number,
+					SUM(CASE
+						WHEN se.stock_entry_type = 'Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+						WHEN se.stock_entry_type = 'Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN -sed.amount
+						ELSE sed.amount END) AS net_change
+				FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+				WHERE se.docstatus = 1 AND se.company = %(company)s
+				  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				  AND COALESCE(sed.project, se.project) IS NOT NULL
+				  AND CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN 'MR'
+						   WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN 'MRS'
+						   ELSE 'OTHER' END IN ('MR','MRS')
+				GROUP BY COALESCE(sed.project, se.project)
+			) m ON m.jo_number = j.jo_number
+			LEFT JOIN (
+				SELECT jo_number, SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
+				FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number,
+						CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+							 WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN 0
+							 ELSE sed.amount END AS debit,
+						CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN 0
+							 WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN sed.amount
+							 ELSE 0 END AS credit,
+						CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+							 WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN -sed.amount
+							 ELSE sed.amount END AS net_change
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus=1 AND se.company=%(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+				) sx GROUP BY jo_number
+			) s ON s.jo_number = j.jo_number
+			WHERE COALESCE(m.net_change,0)<>0 OR COALESCE(s.net_change,0)<>0
+			UNION ALL
+			/* ══════════════════════════════════════════════════════
+			   §5  JE/PI DETAIL ROWS
+			══════════════════════════════════════════════════════ */
+			SELECT 1, j.jo_number, 5,
+				   c.tran_date, c.doc_no_field, c.doc_type, c.reference,
+				   c.payee_received_from, c.particulars,
+				   c.debit, c.credit, c.net_change, c.status_label,
+				   c.creation, c.modified_by, c.modified, c.owner
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					UNION
+					SELECT pii.project FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) src WHERE jo_number IS NOT NULL
+			) j
+			JOIN (
+				SELECT jea.project AS jo_number,
+					je.posting_date AS tran_date,
+					REPLACE(REPLACE(REPLACE(je.name,'ACC-JV-R-',''),'ACC-JV-A-',''),'ACC-JVP-','') AS doc_no_field,
+					je.voucher_type AS doc_type,
+					je.user_remark AS reference,
+					CASE
+						WHEN je.user_remark LIKE '%%SA#%%'      THEN je.pay_to_recd_from
+						WHEN je.user_remark LIKE '%%COS%%'      THEN 'CLOSED TO COS'
+						WHEN je.user_remark LIKE '%%VP-ALPHA%%' THEN 'ADJUSTMENT TO COS'
+						WHEN je.user_remark LIKE '%%INV%%'      THEN 'CLOSED TO COS'
+						WHEN je.user_remark LIKE '%%VP#%%'      THEN jea.party
+						ELSE jea.party
+					END AS payee_received_from,
+					jea.user_remark AS particulars,
+					jea.debit AS debit,
+					jea.credit AS credit,
+					(jea.debit - jea.credit) AS net_change,
+					CASE WHEN je.docstatus = 2 THEN 'Cancelled' ELSE 'Submitted' END AS status_label,
+					je.creation AS creation, je.modified_by AS modified_by,
+					je.modified AS modified, je.owner AS owner
+				FROM `tabJournal Entry` je
+				JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+				WHERE je.docstatus IN (1, 2)
+				  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+					   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+					   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+				  AND je.company = %(company)s
+				  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				  AND jea.project IS NOT NULL
+				  AND jea.account LIKE '1521%%'
+				UNION ALL
+				SELECT pii.project AS jo_number,
+					pi.posting_date AS tran_date,
+					pi.remarks AS doc_no_field,
+					'Purchase Invoice' AS doc_type,
+					CONCAT(COALESCE(pii.item_code,''),' ',COALESCE(pii.item_name,'')) AS reference,
+					pi.supplier AS payee_received_from,
+					COALESCE(pii.description, pii.item_name, '') AS particulars,
+					pii.base_amount AS debit,
+					0 AS credit,
+					pii.base_amount AS net_change,
+					CASE WHEN pi.docstatus = 2 THEN 'Cancelled' ELSE 'Submitted' END AS status_label,
+					pi.creation AS creation, pi.modified_by AS modified_by,
+					pi.modified AS modified, pi.owner AS owner
+				FROM `tabPurchase Invoice Item` pii
+				JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+				WHERE pi.docstatus IN (1, 2)
+				  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+					   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+					   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+				  AND pi.company = %(company)s
+				  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				  AND pii.expense_account LIKE '1521%%'
+			) c ON c.jo_number = j.jo_number
+			UNION ALL
+			/* ══════════════════════════════════════════════════════
+			   §6  JE/PI TOTAL per JO
+			══════════════════════════════════════════════════════ */
+			SELECT 1, j.jo_number, 6,
+				   NULL, NULL, '', NULL,
+				   NULL, 'TOTAL:',
+				   jp.debit, jp.credit, jp.net_change, NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					UNION
+					SELECT pii.project FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) src WHERE jo_number IS NOT NULL
+			) j
+			JOIN (
+				SELECT jo_number, SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
+				FROM (
+					SELECT jea.project AS jo_number, jea.debit, jea.credit, (jea.debit-jea.credit) AS net_change
+					FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent=je.name
+					WHERE je.docstatus=1 AND je.company=%(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND jea.project IS NOT NULL
+					  AND jea.account LIKE '1521%%'
+					UNION ALL
+					SELECT pii.project, pii.base_amount, 0, pii.base_amount
+					FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name=pii.parent
+					WHERE pi.docstatus=1 AND pi.company=%(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) jpx GROUP BY jo_number
+			) jp ON jp.jo_number = j.jo_number
+			WHERE COALESCE(jp.debit,0)<>0 OR COALESCE(jp.credit,0)<>0 OR COALESCE(jp.net_change,0)<>0
+			UNION ALL
+			/* ══════════════════════════════════════════════════════
+			   §7  GRAND TOTAL per JO
+			══════════════════════════════════════════════════════ */
+			SELECT 1, j.jo_number, 7,
+				   NULL, NULL, '', NULL,
+				   NULL, '<b>GRAND TOTAL:</b>',
+				   COALESCE(s.debit,0) + COALESCE(jp.debit,0),
+				   COALESCE(s.credit,0) + COALESCE(jp.credit,0),
+				   COALESCE(s.net_change,0) + COALESCE(jp.net_change,0),
+				   NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					UNION
+					SELECT pii.project FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) src WHERE jo_number IS NOT NULL
+			) j
+			LEFT JOIN (
+				SELECT jo_number, SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
+				FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number,
+						CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+							 WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN 0
+							 ELSE sed.amount END AS debit,
+						CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN 0
+							 WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN sed.amount
+							 ELSE 0 END AS credit,
+						CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+							 WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN -sed.amount
+							 ELSE sed.amount END AS net_change
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent=se.name
+					WHERE se.docstatus=1 AND se.company=%(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project,se.project) IS NOT NULL
+				) sx GROUP BY jo_number
+			) s ON s.jo_number = j.jo_number
+			LEFT JOIN (
+				SELECT jo_number, SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
+				FROM (
+					SELECT jea.project AS jo_number, jea.debit, jea.credit, (jea.debit-jea.credit) AS net_change
+					FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent=je.name
+					WHERE je.docstatus=1 AND je.company=%(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					  AND jea.account LIKE '1521%%'
+					UNION ALL
+					SELECT pii.project, pii.base_amount, 0, pii.base_amount
+					FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name=pii.parent
+					WHERE pi.docstatus=1 AND pi.company=%(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) jpx GROUP BY jo_number
+			) jp ON jp.jo_number = j.jo_number
+			WHERE COALESCE(s.debit,0)+COALESCE(jp.debit,0)<>0
+			   OR COALESCE(s.credit,0)+COALESCE(jp.credit,0)<>0
+			   OR COALESCE(s.net_change,0)+COALESCE(jp.net_change,0)<>0
+			UNION ALL
+			/* ══════════════════════════════════════════════════════
+			   §8 & §9  BLANK SEPARATOR ROWS
+			══════════════════════════════════════════════════════ */
+			SELECT 1, j.jo_number, 8, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					UNION
+					SELECT pii.project FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) src WHERE jo_number IS NOT NULL
+			) j
+			UNION ALL
+			SELECT 1, j.jo_number, 9, NULL, NULL, '', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT jo_number FROM (
+					SELECT COALESCE(sed.project, se.project) AS jo_number
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+					WHERE se.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND se.docstatus = 2))
+					  AND se.company = %(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project, se.project) IS NOT NULL
+					UNION
+					SELECT jea.project FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
+					WHERE je.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND je.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND je.docstatus = 2))
+					  AND je.company = %(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					UNION
+					SELECT pii.project FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+					WHERE pi.docstatus IN (1, 2)
+					  AND (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'All transactions'
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Posted Transactions'    AND pi.docstatus = 1)
+						   OR (COALESCE(NULLIF(%(status)s, ''), 'All transactions') = 'Cancelled Transactions' AND pi.docstatus = 2))
+					  AND pi.company = %(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) src WHERE jo_number IS NOT NULL
+			) j
+			/* ══════════════════════════════════════════════════════
+			   REPORT-WIDE FOOTER
+			══════════════════════════════════════════════════════ */
+			UNION ALL
+			SELECT 2, NULL, 1, NULL, NULL, '', NULL,
+				   'INVENTORY ENTRY TO GL', 'MR/MRS TOTAL:',
+				   net_change, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT SUM(CASE
+					WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+					WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN -sed.amount
+					ELSE sed.amount END) AS net_change
+				FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent=se.name
+				WHERE se.docstatus=1 AND se.company=%(company)s
+				  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				  AND COALESCE(sed.project,se.project) IS NOT NULL
+				  AND CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN 'MR'
+						   WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN 'MRS'
+						   ELSE 'OTHER' END IN ('MR','MRS')
+			) mmt WHERE COALESCE(net_change,0)<>0
+			UNION ALL
+			SELECT 2, NULL, 3, NULL, NULL, '', NULL,
+				   '<b>INVENTORY ENTRY TO GL</b>', '<b>OVER ALL TOTAL:</b>',
+				   mmt.net_change, NULL, glt.net_change, NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT SUM(CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+								WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN -sed.amount
+								ELSE sed.amount END) AS net_change
+				FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent=se.name
+				WHERE se.docstatus=1 AND se.company=%(company)s
+				  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				  AND COALESCE(sed.project,se.project) IS NOT NULL
+				  AND CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN 'MR'
+						   WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN 'MRS'
+						   ELSE 'OTHER' END IN ('MR','MRS')
+			) mmt
+			CROSS JOIN (
+				SELECT SUM(net_change) AS net_change
+				FROM (
+					SELECT CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+								WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN -sed.amount
+								ELSE sed.amount END AS net_change
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent=se.name
+					WHERE se.docstatus=1 AND se.company=%(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project,se.project) IS NOT NULL
+				) gx
+			) glt
+			WHERE COALESCE(mmt.net_change,0)<>0 OR COALESCE(glt.net_change,0)<>0
+			UNION ALL
+			SELECT 2, NULL, 4, NULL, NULL, '', NULL,
+				   NULL, '<b>TOTAL:</b>',
+				   debit, credit, net_change, NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
+				FROM (
+					SELECT jea.debit, jea.credit, (jea.debit-jea.credit) AS net_change
+					FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent=je.name
+					WHERE je.docstatus=1 AND je.company=%(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					  AND jea.account LIKE '1521%%'
+					UNION ALL
+					SELECT pii.base_amount, 0, pii.base_amount
+					FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name=pii.parent
+					WHERE pi.docstatus=1 AND pi.company=%(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) jpx
+			) jpt WHERE COALESCE(debit,0)<>0 OR COALESCE(credit,0)<>0 OR COALESCE(net_change,0)<>0
+			UNION ALL
+			SELECT 2, NULL, 5, NULL, NULL, '', NULL,
+				   NULL, '<b>GRAND TOTAL:</b>',
+				   glt.debit + jpt.debit,
+				   glt.credit + jpt.credit,
+				   glt.net_change + jpt.net_change,
+				   NULL, NULL, NULL, NULL, NULL
+			FROM (
+				SELECT SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
+				FROM (
+					SELECT CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+								WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN 0
+								ELSE sed.amount END AS debit,
+						   CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN 0
+								WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN sed.amount
+								ELSE 0 END AS credit,
+						   CASE WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') LIKE 'Stores%%' THEN sed.amount
+								WHEN se.stock_entry_type='Material Transfer' AND COALESCE(sed.s_warehouse,'') NOT LIKE 'Stores%%' THEN -sed.amount
+								ELSE sed.amount END AS net_change
+					FROM `tabStock Entry` se JOIN `tabStock Entry Detail` sed ON sed.parent=se.name
+					WHERE se.docstatus=1 AND se.company=%(company)s
+					  AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
+					  AND COALESCE(sed.project,se.project) IS NOT NULL
+				) gx
+			) glt
+			CROSS JOIN (
+				SELECT SUM(debit) AS debit, SUM(credit) AS credit, SUM(net_change) AS net_change
+				FROM (
+					SELECT jea.debit, jea.credit, (jea.debit-jea.credit) AS net_change
+					FROM `tabJournal Entry` je JOIN `tabJournal Entry Account` jea ON jea.parent=je.name
+					WHERE je.docstatus=1 AND je.company=%(company)s
+					  AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s AND jea.project IS NOT NULL
+					  AND jea.account LIKE '1521%%'
+					UNION ALL
+					SELECT pii.base_amount, 0, pii.base_amount
+					FROM `tabPurchase Invoice Item` pii JOIN `tabPurchase Invoice` pi ON pi.name=pii.parent
+					WHERE pi.docstatus=1 AND pi.company=%(company)s
+					  AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s AND pii.expense_account LIKE '1521%%'
+				) jpx
+			) jpt
+			WHERE COALESCE(glt.debit,0)+COALESCE(jpt.debit,0)<>0
+			   OR COALESCE(glt.credit,0)+COALESCE(jpt.credit,0)<>0
+			   OR COALESCE(glt.net_change,0)+COALESCE(jpt.net_change,0)<>0
+		) r
 		ORDER BY
 			r.block_order,
 			r.jo_number,

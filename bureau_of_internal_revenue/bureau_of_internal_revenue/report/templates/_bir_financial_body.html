@@ -1,10 +1,10 @@
 {%
-	var report_columns = report.get_columns_for_print();
-	report_columns = report_columns.filter(col => !col.hidden);
-	if (report_columns.length > 8) {
-		frappe.throw(__("Too many columns. Export the report and print it using a spreadsheet application."));
-	}
+	var _cp = report.get_columns_for_print ? (report.get_columns_for_print() || []) : [];
+	var _ci = (typeof columns !== "undefined" && columns) ? columns : [];
+	var report_columns = (_cp.length >= _ci.length ? _cp : _ci);
+	report_columns = (report_columns || []).filter(function (c) { return c && !c.hidden; });
 %}
+
 <style>
 	.financial-statements-important td { font-weight: bold; }
 	.financial-statements-blank-row td { height: 37px; }

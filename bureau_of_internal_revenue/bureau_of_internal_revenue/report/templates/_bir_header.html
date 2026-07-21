@@ -1,6 +1,6 @@
 {%
-	var _start = filters.period_start_date || filters.from_date;
-	var _end = filters.period_end_date || filters.to_date;
+	var _start = filters.period_start_date || filters.from_date || filters.year_start_date;
+	var _end = filters.period_end_date || filters.to_date || filters.year_end_date;
 	var _fy = filters.from_fiscal_year || filters.fiscal_year;
 %}
 <h2 class="text-center">{%= __(report.report_name) %}</h2>

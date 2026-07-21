@@ -1,0 +1,16 @@
+{%
+	var _start = filters.period_start_date || filters.from_date;
+	var _end = filters.period_end_date || filters.to_date;
+	var _fy = filters.from_fiscal_year || filters.fiscal_year;
+%}
+<h2 class="text-center">{%= __(report.report_name) %}</h2>
+{% if (_start && _end) { %}
+	<h5 class="text-center">
+		{%= __("For the Period") %}: {%= moment(_start).format("MMMM DD, YYYY") %} to {%= moment(_end).format("MMMM DD, YYYY") %}
+	</h5>
+{% } else if (_fy) { %}
+	<h5 class="text-center">
+		{%= __("For the Fiscal Year") %}: {%= _fy %}{% if (filters.to_fiscal_year && filters.to_fiscal_year != _fy) { %} to {%= filters.to_fiscal_year %}{% } %}
+	</h5>
+{% } %}
+<hr>

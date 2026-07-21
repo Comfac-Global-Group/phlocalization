@@ -1,9 +1,10 @@
 {%
-	var report_columns = (typeof columns !== "undefined" && columns && columns.length)
-		? columns
-		: (report.get_columns_for_print ? report.get_columns_for_print() : []);
+	var _cp = report.get_columns_for_print ? (report.get_columns_for_print() || []) : [];
+	var _ci = (typeof columns !== "undefined" && columns) ? columns : [];
+	var report_columns = (_cp.length >= _ci.length ? _cp : _ci);
 	report_columns = (report_columns || []).filter(function (c) { return c && !c.hidden; });
 %}
+
 <style>
 	.bir-generic-table { width: 100%; font-size: 11px; }
 	.bir-generic-table th, .bir-generic-table td { padding: 4px 6px; }

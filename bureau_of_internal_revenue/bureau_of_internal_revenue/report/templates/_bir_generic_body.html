@@ -8,6 +8,65 @@
 <style>
 	.bir-generic-table {
 		width: 100%;
+		font-size: 8px;
+		table-layout: fixed;
+	}
+	.bir-generic-table th,
+	.bir-generic-table td {
+		padding: 2px 3px;
+		word-break: break-word;
+		overflow-wrap: break-word;
+	}
+
+	/* narrow columns — by position. col 1 = #, then columns follow your header order.
+	   Adjust the nth-child numbers if your column order differs. */
+	.bir-generic-table th:nth-child(1),  .bir-generic-table td:nth-child(1)  { width: 20px; }  /* # */
+	.bir-generic-table th:nth-child(11), .bir-generic-table td:nth-child(11) { width: 28px; }  /* Terms */
+	.bir-generic-table th:nth-child(12), .bir-generic-table td:nth-child(12) { width: 22px; }  /* Unit */
+	.bir-generic-table th:nth-child(13), .bir-generic-table td:nth-child(13) { width: 26px; }  /* Quantity */
+	.bir-generic-table th:nth-child(15), .bir-generic-table td:nth-child(15) { width: 24px; }  /* Discount */
+	.bir-generic-table th:nth-child(18), .bir-generic-table td:nth-child(18) { width: 30px; }  /* Status */
+</style>
+<table class="table table-bordered bir-generic-table">
+	<thead>
+		<tr>
+			<th style="width: 36px;">#</th>
+			{% for (let i=0, l=report_columns.length; i<l; i++) { %}
+				{% var _c = report_columns[i]; %}
+				<th class="{%= (_c.fieldtype=='Currency' || _c.fieldtype=='Float' || _c.fieldtype=='Int' || _c.fieldtype=='Percent') ? 'text-right' : '' %}">{%= _c.label %}</th>
+			{% } %}
+		</tr>
+	</thead>
+	<tbody>
+		{% for (let j=0, k=data.length; j<k; j++) { %}
+			{% var row = data[j]; %}
+			<tr>
+				<td>{%= j + 1 %}</td>
+				{% for (let i=0, l=report_columns.length; i<l; i++) { %}
+					{% var _c = report_columns[i]; var _fn = _c.fieldname; %}
+					<td class="{%= (_c.fieldtype=='Currency' || _c.fieldtype=='Float' || _c.fieldtype=='Int' || _c.fieldtype=='Percent') ? 'text-right' : '' %}">
+						{% if (!is_null(row[_fn])) { %}{%= frappe.format(row[_fn], _c, {}, row) %}{% } %}
+					</td>
+				{% } %}
+			</tr>
+		{% } %}
+	</tbody>
+</table>
+<p class="text-right text-muted">
+	{%= __("Printed on {0}", [frappe.datetime.str_to_user(frappe.datetime.get_datetime_as_string())]) %}
+</p>
+					
+					
+<!-- {%
+	var _cp = report.get_columns_for_print ? (report.get_columns_for_print() || []) : [];
+	var _ci = (typeof columns !== "undefined" && columns) ? columns : [];
+	var report_columns = (_cp.length >= _ci.length ? _cp : _ci);
+	report_columns = (report_columns || []).filter(function (c) { return c && !c.hidden; });
+%}
+
+<style>
+	.bir-generic-table {
+		width: 100%;
 		font-size: 7px;
 		table-layout: fixed;
 	}
@@ -45,4 +104,4 @@
 </table>
 <p class="text-right text-muted">
 	{%= __("Printed on {0}", [frappe.datetime.str_to_user(frappe.datetime.get_datetime_as_string())]) %}
-</p>
+</p> -->

@@ -6,8 +6,11 @@
 %}
 
 <style>
+	/* Long / Folio paper (8.5 x 13 in = 215 x 330 mm), landscape.
+	   NOTE: wkhtmltopdf (Frappe PDF export) ignores this @page size.
+	   Set the page size in the Print Format's Page Settings too. */
 	@page {
-		size: A3 landscape;
+		size: 330mm 215mm;
 		margin: 6mm;
 	}
 

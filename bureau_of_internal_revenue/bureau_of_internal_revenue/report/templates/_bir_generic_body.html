@@ -5,83 +5,44 @@
 	report_columns = (report_columns || []).filter(function (c) { return c && !c.hidden; });
 %}
 
-
-	<style>
-@page {
-    size: 215mm 330mm;
-    margin: 6mm;
-}
-	table {
+<style>
+	.bir-generic-table {
 		width: 100%;
-		table-layout: auto;
-		border-collapse: collapse;
-		font-size: 6px;
+		font-size: 7px;
+		table-layout: fixed;
 	}
-
-
-	
-
 	.bir-generic-table th,
 	.bir-generic-table td {
-		padding: 2px;
-		white-space: normal;        /* was nowrap — now text wraps */
-		overflow-wrap: break-word;  /* long tokens like PROJ-25-E-01001 can break */
+		padding: 2px 3px;
 		word-break: break-word;
-		vertical-align: top;
+		overflow-wrap: break-word;
 	}
-
-	.bir-generic-table th {
-		text-align: center;
-		font-weight: bold;
-	}
-
-	/* keep numeric columns on a single line so amounts don't split */
-	.bir-generic-table td.text-right,
-	.bir-generic-table th.text-right {
-		white-space: nowrap;
-	}
-
-	.text-right { text-align: right; }
-	.text-center { text-align: center; }
 </style>
-
 <table class="table table-bordered bir-generic-table">
 	<thead>
 		<tr>
-			<th style="width:36px;">#</th>
-
+			<th style="width: 36px;">#</th>
 			{% for (let i=0, l=report_columns.length; i<l; i++) { %}
 				{% var _c = report_columns[i]; %}
-				<th
-					style="width:{%= 96 / report_columns.length %}%;"
-					class="{%= (_c.fieldtype=='Currency' || _c.fieldtype=='Float' || _c.fieldtype=='Int' || _c.fieldtype=='Percent') ? 'text-right' : '' %}">
-					{%= _c.label %}
-				</th>
+				<th class="{%= (_c.fieldtype=='Currency' || _c.fieldtype=='Float' || _c.fieldtype=='Int' || _c.fieldtype=='Percent') ? 'text-right' : '' %}">{%= _c.label %}</th>
 			{% } %}
 		</tr>
 	</thead>
-
 	<tbody>
 		{% for (let j=0, k=data.length; j<k; j++) { %}
 			{% var row = data[j]; %}
 			<tr>
-				<td class="text-center">{%= j + 1 %}</td>
-
+				<td>{%= j + 1 %}</td>
 				{% for (let i=0, l=report_columns.length; i<l; i++) { %}
-					{% var _c = report_columns[i]; %}
-					{% var _fn = _c.fieldname; %}
-
+					{% var _c = report_columns[i]; var _fn = _c.fieldname; %}
 					<td class="{%= (_c.fieldtype=='Currency' || _c.fieldtype=='Float' || _c.fieldtype=='Int' || _c.fieldtype=='Percent') ? 'text-right' : '' %}">
-						{% if (!is_null(row[_fn])) { %}
-							{%= frappe.format(row[_fn], _c, {}, row) %}
-						{% } %}
+						{% if (!is_null(row[_fn])) { %}{%= frappe.format(row[_fn], _c, {}, row) %}{% } %}
 					</td>
 				{% } %}
 			</tr>
 		{% } %}
 	</tbody>
 </table>
-
 <p class="text-right text-muted">
 	{%= __("Printed on {0}", [frappe.datetime.str_to_user(frappe.datetime.get_datetime_as_string())]) %}
 </p>

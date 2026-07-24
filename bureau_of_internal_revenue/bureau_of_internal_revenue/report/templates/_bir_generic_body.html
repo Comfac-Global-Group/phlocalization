@@ -5,21 +5,21 @@
 	report_columns = (report_columns || []).filter(function (c) { return c && !c.hidden; });
 %}
 
-<style>
-	/* Long / Folio paper (8.5 x 13 in = 215 x 330 mm), landscape.
-	   NOTE: wkhtmltopdf (Frappe PDF export) ignores this @page size.
-	   Set the page size in the Print Format's Page Settings too. */
-	@page {
-		size: 330mm 215mm;
-		margin: 6mm;
+
+	<style>
+@page {
+    size: 215mm 330mm;
+    margin: 6mm;
+}
+	table {
+		width: 100%;
+		table-layout: auto;
+		border-collapse: collapse;
+		font-size: 6px;
 	}
 
-	.bir-generic-table {
-		width: 100%;
-		table-layout: fixed;
-		border-collapse: collapse;
-		font-size: 7px;
-	}
+
+	
 
 	.bir-generic-table th,
 	.bir-generic-table td {

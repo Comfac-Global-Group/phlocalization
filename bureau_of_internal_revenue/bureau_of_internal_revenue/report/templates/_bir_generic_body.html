@@ -7,37 +7,34 @@
 
 <style>
 	@page {
-		size: A3 landscape;
-		margin: 6mm;
-	}
+    size: A3 landscape;
+    margin: 6mm;
+}
 
-	.bir-generic-table {
-		width: 100%;
-		table-layout: fixed;
-		border-collapse: collapse;
-		font-size: 7px;
-	}
+.bir-generic-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 7px;
+}
 
-	.bir-generic-table th,
-	.bir-generic-table td {
-		padding: 2px;
-		white-space: nowrap;
-		vertical-align: middle;
-	}
+.bir-generic-table th,
+.bir-generic-table td {
+    padding: 2px;
+    white-space: normal;        /* was nowrap — now text wraps */
+    overflow-wrap: break-word;  /* long tokens like PROJ-25-E-01001 can break */
+    word-break: break-word;
+    vertical-align: top;
+}
 
-	.bir-generic-table th {
-		text-align: center;
-		font-weight: bold;
-	}
+/* keep numeric columns on a single line so amounts don't split */
+.bir-generic-table td.text-right,
+.bir-generic-table th.text-right {
+    white-space: nowrap;
+}
 
-	.text-right {
-		text-align: right;
-	}
-
-	.text-center {
-		text-align: center;
-	}
-</style>
+.text-right { text-align: right; }
+.text-center { text-align: center; }
 
 <table class="table table-bordered bir-generic-table">
 	<thead>

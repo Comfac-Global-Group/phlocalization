@@ -53,6 +53,7 @@ def get_columns():
 		{"label": _("Quantity Difference"), "fieldname": "qty", "fieldtype": "Data", "width": 120},
 		{"label": _("Unit Cost"), "fieldname": "unit_cost", "fieldtype": "Data", "width": 110},
 		{"label": _("Total Cost"), "fieldname": "total_cost", "fieldtype": "Data", "width": 140},
+		{"label": _("Status"), "fieldname": "status", "fieldtype": "Data", "width": 100},
 		{"label": _("Created On"), "fieldname": "creation", "fieldtype": "Datetime", "width": 150},
 		{"label": _("Modified By"), "fieldname": "modified_by", "fieldtype": "Data", "width": 150},
 		{"label": _("Modified On"), "fieldname": "modified", "fieldtype": "Datetime", "width": 150},
@@ -63,17 +64,20 @@ def get_columns():
 def get_data(filters):
 	"""
 	Build and execute the audit trail SQL query.
-	JO Number uses line-level project first: COALESCE(sed.project, se.project) and COALESCE(pri.project, pr.project). Stock Reconciliation has no project field so its jo_number is blank.
+	JO Number uses line-level project first: COALESCE(sed.project, se.project) and
+	COALESCE(pri.project, pr.project). Stock Reconciliation has no project field so
+	its jo_number is blank.
 	creation, modified_by, modified, and owner are taken from the parent transaction
 	document (Stock Entry / Stock Reconciliation / Purchase Receipt) so they reflect
 	when/by whom the transaction itself was created and last modified.
 	"""
 	params = {
-		"warehouse": filters.get("warehouse"),
+		"warehouse":filters.get("warehouse"),
 		"from_date": filters.get("from_date"),
 		"to_date": filters.get("to_date"),
 		"entry_type": filters.get("entry_type") or "",
 		"project": filters.get("project") or "",
+		"status": filters.get("status") or "",
 	}
 
 	sql = """
@@ -105,6 +109,7 @@ def get_data(filters):
 				THEN CONCAT('<b>', FORMAT(total_cost, 2), '</b>')
 				ELSE FORMAT(total_cost, 2)
 			END AS total_cost,
+			status,
 			creation,
 			modified_by,
 			modified,
@@ -132,6 +137,7 @@ def get_data(filters):
 				audit_data.qty_diff AS qty,
 				audit_data.unit_cost,
 				audit_data.total_cost,
+				audit_data.status,
 				audit_data.creation,
 				audit_data.modified_by,
 				audit_data.modified,
@@ -163,6 +169,12 @@ def get_data(filters):
 					END AS qty_diff,
 					COALESCE(sed.valuation_rate, 0) AS unit_cost,
 					COALESCE(sed.transfer_qty * sed.valuation_rate, 0) AS total_cost,
+					CASE
+						WHEN se.docstatus = 0 THEN 'Draft'
+						WHEN se.docstatus = 1 THEN 'Submitted'
+						WHEN se.docstatus = 2 THEN 'Cancelled'
+						ELSE 'Unknown'
+					END AS status,
 					se.creation,
 					se.modified_by,
 					se.modified,
@@ -173,13 +185,15 @@ def get_data(filters):
 				LEFT JOIN `tabCustomer` c ON c.name = p.customer
 				WHERE
 					se.stock_entry_type = 'Material Transfer'
-					AND (
-						sed.s_warehouse = %(warehouse)s
-						OR sed.t_warehouse = %(warehouse)s
-					)
+					AND (sed.s_warehouse = %(warehouse)s OR sed.t_warehouse = %(warehouse)s)
 					AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND se.docstatus IN (0, 1, 2)
 					AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND se.docstatus = 2)
+					)
 
 				UNION ALL
 
@@ -201,6 +215,12 @@ def get_data(filters):
 					COALESCE(sri.quantity_difference, 0) AS qty_diff,
 					COALESCE(sri.valuation_rate, 0) AS unit_cost,
 					COALESCE(sri.quantity_difference * sri.valuation_rate, 0) AS total_cost,
+					CASE
+						WHEN sr.docstatus = 0 THEN 'Draft'
+						WHEN sr.docstatus = 1 THEN 'Submitted'
+						WHEN sr.docstatus = 2 THEN 'Cancelled'
+						ELSE 'Unknown'
+					END AS status,
 					sr.creation,
 					sr.modified_by,
 					sr.modified,
@@ -214,6 +234,11 @@ def get_data(filters):
 					AND sr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND sr.docstatus IN (0, 1, 2)
 					AND %(project)s = ''
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND sr.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND sr.docstatus = 2)
+					)
 
 				UNION ALL
 
@@ -235,6 +260,12 @@ def get_data(filters):
 					pri.qty AS qty_diff,
 					COALESCE(pri.valuation_rate, 0) AS unit_cost,
 					COALESCE(pri.stock_qty * pri.valuation_rate, 0) AS total_cost,
+					CASE
+						WHEN pr.docstatus = 0 THEN 'Draft'
+						WHEN pr.docstatus = 1 THEN 'Submitted'
+						WHEN pr.docstatus = 2 THEN 'Cancelled'
+						ELSE 'Unknown'
+					END AS status,
 					pr.creation,
 					pr.modified_by,
 					pr.modified,
@@ -246,11 +277,14 @@ def get_data(filters):
 					AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND pr.docstatus IN (0, 1, 2)
 					AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND pr.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND pr.docstatus = 2)
+					)
 			) audit_data
 			WHERE
-				(%(entry_type)s IS NULL
-				OR %(entry_type)s = ''
-				OR audit_data.entry_type = %(entry_type)s)
+				(%(entry_type)s IS NULL OR %(entry_type)s = '' OR audit_data.entry_type = %(entry_type)s)
 
 			UNION ALL
 
@@ -279,6 +313,7 @@ def get_data(filters):
 					ELSE NULL
 				END AS unit_cost,
 				SUM(audit_data.total_cost) AS total_cost,
+				NULL AS status,
 				NULL AS creation,
 				NULL AS modified_by,
 				NULL AS modified,
@@ -301,13 +336,15 @@ def get_data(filters):
 				JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
 				WHERE
 					se.stock_entry_type = 'Material Transfer'
-					AND (
-						sed.s_warehouse = %(warehouse)s
-						OR sed.t_warehouse = %(warehouse)s
-					)
+					AND (sed.s_warehouse = %(warehouse)s OR sed.t_warehouse = %(warehouse)s)
 					AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND se.docstatus IN (0, 1, 2)
 					AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND se.docstatus = 2)
+					)
 
 				UNION ALL
 
@@ -324,6 +361,11 @@ def get_data(filters):
 					AND sr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND sr.docstatus IN (0, 1, 2)
 					AND %(project)s = ''
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND sr.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND sr.docstatus = 2)
+					)
 
 				UNION ALL
 
@@ -339,11 +381,14 @@ def get_data(filters):
 					AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND pr.docstatus IN (0, 1, 2)
 					AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND pr.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND pr.docstatus = 2)
+					)
 			) audit_data
 			WHERE
-				(%(entry_type)s IS NULL
-				OR %(entry_type)s = ''
-				OR audit_data.entry_type = %(entry_type)s)
+				(%(entry_type)s IS NULL OR %(entry_type)s = '' OR audit_data.entry_type = %(entry_type)s)
 				AND audit_data.jo_number != ''
 			GROUP BY audit_data.jo_number
 
@@ -355,25 +400,8 @@ def get_data(filters):
 			SELECT
 				3 AS sort_order,
 				jo_number AS sort_jo,
-				NULL AS entry_type,
-				NULL AS id,
-				NULL AS doctype,
-				NULL AS jo_number,
-				NULL AS posting_date,
-				NULL AS supp_cust_code,
-				NULL AS supplier,
-				NULL AS item_code,
-				NULL AS item_name,
-				NULL AS warehouse,
-				NULL AS unit,
-				NULL AS uom,
-				NULL AS qty,
-				NULL AS unit_cost,
-				NULL AS total_cost,
-				NULL AS creation,
-				NULL AS modified_by,
-				NULL AS modified,
-				NULL AS owner
+				NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+				NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 			FROM (
 				SELECT DISTINCT jo_number
 				FROM (
@@ -388,13 +416,15 @@ def get_data(filters):
 					JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
 					WHERE
 						se.stock_entry_type = 'Material Transfer'
-						AND (
-							sed.s_warehouse = %(warehouse)s
-							OR sed.t_warehouse = %(warehouse)s
-						)
+						AND (sed.s_warehouse = %(warehouse)s OR sed.t_warehouse = %(warehouse)s)
 						AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 						AND se.docstatus IN (0, 1, 2)
 						AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
+						AND (
+							COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+							OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+							OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND se.docstatus = 2)
+						)
 
 					UNION ALL
 
@@ -409,6 +439,11 @@ def get_data(filters):
 						AND sr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 						AND sr.docstatus IN (0, 1, 2)
 						AND %(project)s = ''
+						AND (
+							COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+							OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND sr.docstatus = 1)
+							OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND sr.docstatus = 2)
+						)
 
 					UNION ALL
 
@@ -422,19 +457,22 @@ def get_data(filters):
 						AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 						AND pr.docstatus IN (0, 1, 2)
 						AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
+						AND (
+							COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+							OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND pr.docstatus = 1)
+							OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND pr.docstatus = 2)
+						)
 				) all_jos
 				WHERE
 					jo_number != ''
-					AND (%(entry_type)s IS NULL
-						OR %(entry_type)s = ''
-						OR all_jos.entry_type = %(entry_type)s)
+					AND (%(entry_type)s IS NULL OR %(entry_type)s = '' OR all_jos.entry_type = %(entry_type)s)
 			) jo_list
 
 			UNION ALL
 
 			/* ================================================
-			GRAND TOTAL
-			================================================ */
+			   GRAND TOTAL
+			   ================================================ */
 			SELECT
 				4 AS sort_order,
 				'ZZZZZ' AS sort_jo,
@@ -457,6 +495,7 @@ def get_data(filters):
 					ELSE NULL
 				END AS unit_cost,
 				SUM(audit_data.total_cost) AS total_cost,
+				NULL AS status,
 				NULL AS creation,
 				NULL AS modified_by,
 				NULL AS modified,
@@ -478,13 +517,15 @@ def get_data(filters):
 				JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
 				WHERE
 					se.stock_entry_type = 'Material Transfer'
-					AND (
-						sed.s_warehouse = %(warehouse)s
-						OR sed.t_warehouse = %(warehouse)s
-					)
+					AND (sed.s_warehouse = %(warehouse)s OR sed.t_warehouse = %(warehouse)s)
 					AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND se.docstatus IN (0, 1, 2)
 					AND (%(project)s = '' OR COALESCE(sed.project, se.project) = %(project)s)
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND se.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND se.docstatus = 2)
+					)
 
 				UNION ALL
 
@@ -500,6 +541,11 @@ def get_data(filters):
 					AND sr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND sr.docstatus IN (0, 1, 2)
 					AND %(project)s = ''
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND sr.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND sr.docstatus = 2)
+					)
 
 				UNION ALL
 
@@ -514,6 +560,11 @@ def get_data(filters):
 					AND pr.posting_date BETWEEN %(from_date)s AND %(to_date)s
 					AND pr.docstatus IN (0, 1, 2)
 					AND (%(project)s = '' OR COALESCE(pri.project, pr.project) = %(project)s)
+					AND (
+						COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'All Transactions'
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Posted Transactions'    AND pr.docstatus = 1)
+						OR (COALESCE(NULLIF(%(status)s, ''), 'Posted Transactions') = 'Cancelled Transactions' AND pr.docstatus = 2)
+					)
 			) audit_data
 			WHERE
 				(%(entry_type)s IS NULL

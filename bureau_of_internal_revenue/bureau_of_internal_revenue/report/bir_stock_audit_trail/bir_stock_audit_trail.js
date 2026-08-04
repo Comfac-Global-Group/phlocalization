@@ -58,5 +58,12 @@ frappe.query_reports["BIR Stock Audit Trail"] = {
                 };
             },
         },
+        {
+            fieldname: "status",
+            label: __("Status"),
+            fieldtype: "Select",
+            options: ["All Transactions", "Posted Transactions", "Cancelled Transactions"].join("\n"),
+            default: "Posted Transactions",
+        },
     ],
 };

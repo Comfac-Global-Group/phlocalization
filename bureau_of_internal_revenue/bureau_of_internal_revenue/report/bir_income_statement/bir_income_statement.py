@@ -21,30 +21,41 @@ IS_SUMMARY_CONFIG = [
 	{"type": "account",     "account_number": "4200", "bold": False},
 	{"type": "calculation", "label": "NET SALES",             "rows": [1, 2],    "bold": True},
 	{"type": "account",     "account_number": "5001",         "bold": False},
-	{"type": "account",     "account_number": "5020",         "bold": False},
-	{"type": "calculation", "label": "GROSS PROFIT",          "rows": [3, 4, 5], "bold": True},
+	{"type": "calculation", "label": "GROSS PROFIT",          "rows": [3, 4], "bold": True},
 	{"type": "account",     "account_number": "5100",         "bold": False},
-	{"type": "calculation", "label": "INCOME BEFORE TAX",     "rows": [6, 7],    "bold": True},
+	{"type": "calculation", "label": "NET OPERATING INCOME (LOSS)",  "rows": [5, 6],    "bold": True},
+	{"type": "net_account", "account_numbers": ["6000", "5200"],
+	 "label": "Other Income (Expenses), NET",                        "bold": False},
+	{"type": "calculation", "label": "NET INCOME BEFORE TAX",     "rows": [7, 8],    "bold": True},
 	{"type": "account",     "account_number": "5300",         "bold": False},
-	{"type": "calculation", "label": "NET INCOME",            "rows": [8, 9],    "bold": True},
+	{"type": "calculation", "label": "NET INCOME",            "rows": [9, 10],   "bold": True},
 ]
 
+# TODO: In future, remove the Account Numbering
 IS_WITH_COS_CONFIG = [
-	{"type": "account_children", "account_number": "4100", "bold": False},
-	{"type": "account_children", "account_number": "4300", "bold": False},
-	{"type": "account_children", "account_number": "4200", "bold": False},
-	{"type": "calculation",      "label": "NET SALES",                                      "rows": [1, 2, 3],     "bold": True},
-	{"type": "account_children", "account_number": "5001", "bold": False},
-	{"type": "account_children", "account_number": "5020", "bold": False},
-	{"type": "calculation",      "label": "GROSS PROFIT",                                   "rows": [4, 5, 6],     "bold": True},
-	{"type": "account_children", "account_number": "5100", "bold": False},
-	{"type": "calculation",      "label": "NET PROFIT AFTER SELLING & ADMIN EXPENSES",      "rows": [7, 8],        "bold": True},
-	{"type": "account_children", "account_number": "6000", "bold": False},
-	{"type": "calculation",      "label": "NET PROFIT BEFORE OTHER EXPENSES",               "rows": [9, 10],       "bold": True},
-	{"type": "account_children", "account_number": "5200", "bold": False},
-	{"type": "calculation",      "label": "NET PROFIT BEFORE PROVISION FOR INCOME TAX",     "rows": [11, 12],      "bold": True},
-	{"type": "account",          "account_number": "5300", "bold": False},
-	{"type": "calculation",      "label": "NET PROFIT / (LOSS)",                            "rows": [13, 14],      "bold": True},
+	{"type": "account_children", "account_number": "4100", "section_key": "gross_sales"},
+	{"type": "account_children", "account_number": "4300", "section_key": "sales_discount"},
+	{"type": "account_children", "account_number": "4200", "section_key": "sales_adj"},
+	{"type": "calculation",      "label": "NET SALES",                                      "section_refs": ["gross_sales", "sales_discount", "sales_adj"],     "bold": True},
+	{"type": "account_children", "account_number": "5001", "section_key": "cogs"},
+	{"type": "calculation",      "label": "GROSS PROFIT",                                   "section_refs": ["net_sales", "cogs"],     "bold": True},
+	{"type": "account_children", "account_number": "5100", "section_key": "opex"},
+	{"type": "calculation",      "label": "NET OPERATING INCOME (LOSS)",      "section_refs": ["gross_profit", "opex"],        "bold": True},
+	{"type": "account_children", "account_number": "6000", "section_key": "other_income"},
+	{"type": "calculation",      "label": "NET PROFIT BEFORE OTHER EXPENSES",               "section_refs": ["net_op_income", "other_income"],       "bold": True},
+	{"type": "account_children", "account_number": "5200", "section_key": "other_exp"},
+	{"type": "calculation",      "label": "NET PROFIT BEFORE PROVISION FOR INCOME TAX",     "section_refs": ["net_before_other_exp", "other_exp"],      "bold": True},
+	{"type": "account",          "account_number": "5300","section_key": "tax", "bold": False},
+	{"type": "calculation",      "label": "NET PROFIT / (LOSS)",                            "section_refs": ["net_before_tax", "tax"],      "bold": True},
+]
+
+IS_WITH_COS_CALC_KEYS = [
+	"net_sales",
+	"gross_profit",
+	"net_op_income",
+	"net_before_other_exp",
+	"net_before_tax",
+	"net_profit",
 ]
 
 
@@ -81,17 +92,10 @@ def get_columns(filters):
 	current_year = getdate(fy.year_start_date).year
 	prev_year = current_year - 1
 
-	report_type = filters.get("report_type", "IS Summary")
-
-	if report_type == "Operating Exp per Dept":
-		columns = [
-			{"fieldname": "account", "label": _("Department / Expense"), "fieldtype": "Data", "width": 320},
-		]
-	else:
-		columns = [
-			{"fieldname": "account",  "label": _("Particulars"),              "fieldtype": "Data",     "width": 320},
-			{"fieldname": "ytd_prev", "label": _("YTD {0}").format(prev_year), "fieldtype": "Currency", "width": 150},
-		]
+	columns = [
+		{"fieldname": "account", "label": _("Particulars"),              "fieldtype": "Data",     "width": 320},
+		{"fieldname": "ytd_prev", "label": _("YTD {0}").format(prev_year), "fieldtype": "Currency", "width": 150},
+	]
 
 	for label in MONTH_LABELS:
 		columns.append({
@@ -145,6 +149,8 @@ def build_is_summary(filters):
 	for cfg in IS_SUMMARY_CONFIG:
 		if cfg["type"] == "account":
 			row = build_gl_row(company, year_start, prev_start, prev_end, cfg, extra_cond, extra_params, account_cache)
+		elif cfg["type"] == "net_account":
+			row = build_net_row(company, year_start, prev_start, prev_end, cfg, extra_cond, extra_params, account_cache)
 		else:
 			row = build_calc_row(cfg, data)
 		data.append(row)
@@ -166,26 +172,28 @@ def build_is_with_cos(filters):
 	account_cache = {}
 	data = []
 	section_totals = {}
-	section_index = 0
+	calc_key_index = 0
 
 	for cfg in IS_WITH_COS_CONFIG:
 		if cfg["type"] == "account_children":
-			section_index += 1
 			rows, total_row = build_children_rows(
 				company, year_start, prev_start, prev_end,
-				cfg, extra_cond, extra_params, account_cache, section_index
+				cfg, extra_cond, extra_params, account_cache, None
 			)
 			data.extend(rows)
 			data.append(total_row)
-			section_totals[section_index] = len(data) - 1
+			section_totals[cfg["section_key"]] = total_row
 
 		elif cfg["type"] == "account":
 			row = build_gl_row(company, year_start, prev_start, prev_end, cfg, extra_cond, extra_params, account_cache)
 			data.append(row)
+			section_totals[cfg["section_key"]] = row
 
 		elif cfg["type"] == "calculation":
-			row = build_calc_row(cfg, data)
+			row = build_cos_calc_row(cfg, section_totals)
 			data.append(row)
+			section_totals[IS_WITH_COS_CALC_KEYS[calc_key_index]] = row
+			calc_key_index += 1
 
 	return data
 
@@ -211,6 +219,17 @@ def build_op_exp_per_dept(filters):
 	if not op_exp_account:
 		return []
 
+	op_lft, op_rgt = frappe.db.get_value("Account", op_exp_account, ["lft", "rgt"])
+
+	expense_accounts = frappe.db.sql("""
+		SELECT name, account_name, account_number, lft, rgt
+		FROM `tabAccount`
+		WHERE company = %(company)s
+			AND is_group = 0
+			AND lft >= %(lft)s AND rgt <= %(rgt)s
+		ORDER BY account_number ASC
+	""", {"company": company, "lft": op_lft, "rgt": op_rgt}, as_dict=True)
+
 	cc_groups = frappe.db.sql("""
 		SELECT name, cost_center_name, lft, rgt
 		FROM `tabCost Center`
@@ -223,8 +242,6 @@ def build_op_exp_per_dept(filters):
 
 	if not cc_groups:
 		return []
-
-	op_lft, op_rgt = frappe.db.get_value("Account", op_exp_account, ["lft", "rgt"])
 
 	data = []
 	grand_total_row = new_empty_row("GRAND TOTAL OPERATING EXPENSES", is_bold=True)
@@ -248,24 +265,36 @@ def build_op_exp_per_dept(filters):
 		subtotal_row = new_empty_row("Total - {0}".format(cc_group.cost_center_name), is_bold=True)
 
 		for cc in child_ccs:
-			row = new_empty_row(cc.cost_center_name, is_bold=False)
+			dept_header = new_empty_row(cc.cost_center_name, is_bold=True)
+			data.append(dept_header)
 
-			for i, month_key in enumerate(MONTHS):
-				m_start = get_first_day("{0}-{1:02d}-01".format(year_start.year, i + 1))
-				m_end = get_last_day(m_start)
-				row[month_key] = get_balance_by_cc(
-					company, op_lft, op_rgt, cc.name, m_start, m_end, extra_cond, extra_params
+			dept_total = new_empty_row("Total - {0}".format(cc.cost_center_name), is_bold=True)
+
+			for acc in expense_accounts:
+				acc_row = new_empty_row(acc.account_name, is_bold=False)
+
+				for i, month_key in enumerate(MONTHS):
+					m_start = get_first_day("{0}-{1:02d}-01".format(year_start.year, i + 1))
+					m_end = get_last_day(m_start)
+					acc_row[month_key] = get_balance_by_cc(
+						company, acc.lft, acc.rgt, cc.name, m_start, m_end, extra_cond, extra_params
+					)
+
+				acc_row["ytd_current"] = flt(sum(flt(acc_row[m]) for m in MONTHS), 2)
+				acc_row["ytd_prev"] = get_balance_by_cc(
+					company, acc.lft, acc.rgt, cc.name, prev_start, prev_end, extra_cond, extra_params
 				)
 
-			row["ytd_current"] = flt(sum(flt(row[m]) for m in MONTHS), 2)
-			row["ytd_prev"] = get_balance_by_cc(
-				company, op_lft, op_rgt, cc.name, prev_start, prev_end, extra_cond, extra_params
-			)
+				has_data = any(flt(acc_row[m]) != 0 for m in MONTHS) or flt(acc_row["ytd_prev"]) != 0
+				if has_data:
+					data.append(acc_row)
+					for field in MONTHS + ["ytd_prev", "ytd_current"]:
+						dept_total[field] = flt(flt(dept_total.get(field, 0)) + flt(acc_row[field]), 2)
 
-			data.append(row)
+			data.append(dept_total)
 
 			for field in MONTHS + ["ytd_prev", "ytd_current"]:
-				subtotal_row[field] = flt(flt(subtotal_row.get(field, 0)) + flt(row[field]), 2)
+				subtotal_row[field] = flt(flt(subtotal_row.get(field, 0)) + flt(dept_total[field]), 2)
 
 		data.append(subtotal_row)
 
@@ -345,6 +374,45 @@ def build_gl_row(company, year_start, prev_start, prev_end, cfg, extra_cond, ext
 
 	row["ytd_current"] = flt(sum(flt(row[m]) for m in MONTHS), 2)
 	row["ytd_prev"] = get_balance(company, lft, rgt, prev_start, prev_end, extra_cond, extra_params)
+
+	return row
+
+
+def build_net_row(company, year_start, prev_start, prev_end, cfg, extra_cond, extra_params, account_cache):
+	row = new_empty_row(cfg["label"], is_bold=cfg.get("bold", False))
+
+	for acc_number in cfg["account_numbers"]:
+		account_name, parent_name = resolve_account(company, acc_number, account_cache)
+		if not parent_name:
+			continue
+
+		lft, rgt = frappe.db.get_value("Account", parent_name, ["lft", "rgt"])
+
+		for i, month_key in enumerate(MONTHS):
+			m_start = get_first_day("{0}-{1:02d}-01".format(year_start.year, i + 1))
+			m_end = get_last_day(m_start)
+			row[month_key] = flt(flt(row[month_key]) + get_balance(
+				company, lft, rgt, m_start, m_end, extra_cond, extra_params
+			), 2)
+
+		row["ytd_current"] = flt(sum(flt(row[m]) for m in MONTHS), 2)
+		row["ytd_prev"] = flt(flt(row["ytd_prev"]) + get_balance(
+			company, lft, rgt, prev_start, prev_end, extra_cond, extra_params
+		), 2)
+
+	return row
+
+
+def build_cos_calc_row(cfg, section_totals):
+	row = new_empty_row(cfg["label"], is_bold=cfg.get("bold", False))
+
+	for field in MONTHS + ["ytd_prev", "ytd_current"]:
+		total = 0
+		for ref_key in cfg["section_refs"]:
+			ref_row = section_totals.get(ref_key)
+			if ref_row:
+				total += flt(ref_row.get(field, 0))
+		row[field] = flt(total, 2)
 
 	return row
 
@@ -434,7 +502,7 @@ def get_balance(company, lft, rgt, from_date, to_date, extra_cond, extra_params)
 	return flt(result[0][0], 2) if result and result[0][0] else 0
 
 
-def get_balance_by_cc(company, op_lft, op_rgt, cost_center, from_date, to_date, extra_cond, extra_params):
+def get_balance_by_cc(company, lft, rgt, cost_center, from_date, to_date, extra_cond, extra_params):
 	"""Fetch the net debit-minus-credit balance for a specific cost center over a date range.
 	Filters GL entries to those belonging to accounts within the operating expense subtree
 	and posted against the given cost center, then returns the rounded sum or zero.
@@ -443,8 +511,8 @@ def get_balance_by_cc(company, op_lft, op_rgt, cost_center, from_date, to_date, 
 		"company": company,
 		"from_date": from_date,
 		"to_date": to_date,
-		"op_lft": op_lft,
-		"op_rgt": op_rgt,
+		"lft": lft,
+		"rgt": rgt,
 		"cost_center": cost_center,
 	}
 	params.update(extra_params)
@@ -457,7 +525,7 @@ def get_balance_by_cc(company, op_lft, op_rgt, cost_center, from_date, to_date, 
 			AND gle.cost_center = %(cost_center)s
 			AND gle.account IN (
 				SELECT name FROM `tabAccount`
-				WHERE lft >= %(op_lft)s AND rgt <= %(op_rgt)s AND company = %(company)s
+				WHERE lft >= %(lft)s AND rgt <= %(rgt)s AND company = %(company)s
 			)
 			AND gle.is_cancelled = 0
 			{extra_cond}

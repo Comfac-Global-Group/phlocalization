@@ -45,6 +45,11 @@ def get_data(filters):
 	Fetch sales invoice data classified by BIR tax category.
 	Uses the customer's tax_category to determine VAT treatment
 	and computes Output VAT, Vatable, Exempt, Zero-Rated, and Net Sales.
+
+	The Status filter controls which docstatus values are included:
+	- "Cancelled Transactions" -> only cancelled invoices (docstatus = 2)
+	- "All transactions"       -> posted and cancelled (docstatus IN (0, 1, 2))
+	- anything else (default)  -> posted only (docstatus = 1)
 	"""
 	query = """
 		SELECT
@@ -122,9 +127,16 @@ def get_data(filters):
 		FROM `tabSales Invoice` si
 		LEFT JOIN `tabCustomer` c ON c.name = si.customer
 		WHERE
-			si.docstatus = 1
-			AND si.company = %(company)s
+			si.company = %(company)s
 			AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
+			AND (
+				(%(status)s = 'Cancelled Transactions' AND si.docstatus = 2)
+				OR
+				(%(status)s = 'All transactions' AND si.docstatus IN (0, 1, 2))
+				OR
+				(IFNULL(%(status)s, '') NOT IN ('Cancelled Transactions', 'All transactions')
+					AND si.docstatus = 1)
+			)
 		ORDER BY
 			si.posting_date ASC,
 			si.name ASC

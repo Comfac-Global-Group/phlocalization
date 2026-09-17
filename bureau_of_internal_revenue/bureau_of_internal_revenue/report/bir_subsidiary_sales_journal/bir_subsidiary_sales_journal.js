@@ -25,5 +25,12 @@ frappe.query_reports["BIR Subsidiary Sales Journal"] = {
 			default: frappe.datetime.get_today(),
 			reqd: 1,
 		},
+		{
+			fieldname: "status",
+			label: __("Status"),
+			fieldtype: "Select",
+			options: "Posted Transactions\nAll transactions\nCancelled Transactions",
+			default: "Posted Transactions",
+		},
 	],
 };

@@ -26,6 +26,7 @@ from erpnext.accounts.utils import get_fiscal_year
 
 
 def execute(filters=None):
+	filters = frappe._dict(filters or {})
 	period_list = get_period_list(
 		filters.from_fiscal_year,
 		filters.to_fiscal_year,
@@ -68,36 +69,40 @@ def execute(filters=None):
 
 	for cash_flow_section in cash_flow_sections:
 		section_data = []
-		data.append(
-			{
-				"section_name": "'" + cash_flow_section["section_header"] + "'",
-				"parent_section": None,
-				"indent": 0.0,
-				"section": cash_flow_section["section_header"],
-			}
-		)
+		header_row = {
+			"section_name": "'" + cash_flow_section["section_header"] + "'",
+			"parent_section": None,
+			"indent": 0.0,
+			"section": cash_flow_section["section_header"],
+		}
+		data.append(header_row)
 
 		if len(data) == 1:
 			# add first net income in operations section
 			if net_profit_loss:
+				profit_loss_label = _get_profit_loss_label(filters.accumulated_values)
 				net_profit_loss.update(
 					{
+						"account": profit_loss_label,
+						"account_name": profit_loss_label,
+						"section_name": profit_loss_label,
+						"section": profit_loss_label,
 						"indent": 1,
 						"parent_section": cash_flow_sections[0]["section_header"],
-						"section": net_profit_loss["account"],
 					}
 				)
 				data.append(net_profit_loss)
 				section_data.append(net_profit_loss)
 
 		for row in cash_flow_section["account_types"]:
+			account_types = _normalize_account_types(row["account_type"])
 			row_data = get_account_type_based_data(
 				filters.company, row["account_type"], period_list, filters.accumulated_values, filters
 			)
 			accounts = frappe.get_all(
 				"Account",
 				filters={
-					"account_type": ["in", row["account_type"]],
+					"account_type": ["in", account_types],
 					"is_group": 0,
 				},
 				pluck="name",
@@ -115,7 +120,7 @@ def execute(filters=None):
 			data.append(row_data)
 			section_data.append(row_data)
 
-		add_total_row_account(
+		section_total = add_total_row_account(
 			data,
 			section_data,
 			cash_flow_section["section_footer"],
@@ -124,6 +129,12 @@ def execute(filters=None):
 			summary_data,
 			filters,
 		)
+
+		# shows the same figure as its own total line.
+		for period in period_list:
+			header_row[period["key"]] = section_total.get(period["key"], 0.0)
+		header_row["total"] = section_total.get("total", 0.0)
+		header_row["currency"] = company_currency
 
 	net_change_in_cash = add_total_row_account(
 		data, data, _("Net Change in Cash"), period_list, company_currency, summary_data, filters
@@ -155,7 +166,7 @@ def get_cash_flow_accounts():
 		"account_types": [
 			{"account_type": "Depreciation", "label": _("Depreciation")},
 			{"account_type": "Receivable", "label": _("Net Change in Accounts Receivable")},
-			{"account_type": "Payable", "label": _("Net Change in Accounts Payable")},
+			{"account_type": ["Payable", "Asset Received But Not Billed", "Stock Received But Not Billed", "Service Received But Not Billed",], "label": _("Net Change in Accounts Payable"),},
 			{"account_type": ["Stock","Stock Adjustment", "Capital Work in Progress"], "label": _("Net Change in Inventory")},
 			{"account_type": ["Tax"], "label": _("Net Change in Taxes Payable")},
 		],
@@ -220,7 +231,7 @@ def get_account_type_based_gl_data(company, filters=None):
 		filters.cost_center = get_cost_centers_with_children(filters.cost_center)
 		cond += " and cost_center in %(cost_center)s"
 
-	filters.account_type = tuple(filters.account_type)
+	filters.account_type = _normalize_account_types(filters.account_type)
 
 	gl_sum = frappe.db.sql_list(
 		f"""
@@ -234,6 +245,20 @@ def get_account_type_based_gl_data(company, filters=None):
 	)
 
 	return gl_sum[0] if gl_sum and gl_sum[0] else 0
+
+
+def _normalize_account_types(account_type):
+	if isinstance(account_type, str):
+		return (account_type,)
+
+	return tuple(account_type)
+
+
+def _get_profit_loss_label(accumulated_values):
+	if accumulated_values:
+		return _("Year-to-Date Profit / (Loss)")
+
+	return _("Profit / (Loss) for the Period")
 
 
 def get_start_date(period, accumulated_values, company):
@@ -289,16 +314,32 @@ def show_opening_and_closing_balance(out, period_list, currency, net_change_in_c
 		"currency": currency,
 	}
 
-	opening_amount = get_opening_balance(filters.company, period_list, filters) or 0.0
-	running_total = opening_amount
+	running_total = 0.0
+	current_fiscal_year_start = None
+	opening_amount = 0.0
 
 	for i, period in enumerate(period_list):
 		key = period["key"]
 		change = net_change_in_cash.get(key, 0.0)
 
-		opening_balance[key] = opening_amount if i == 0 else running_total
-		running_total += change
-		closing_balance[key] = running_total
+		if filters.accumulated_values:
+			fiscal_year_start = get_fiscal_year(period["to_date"], company=filters.company)[1]
+			if fiscal_year_start != current_fiscal_year_start:
+				opening_amount = (
+					get_opening_balance(filters.company, [{"from_date": fiscal_year_start}], filters)
+					or 0.0
+				)
+				current_fiscal_year_start = fiscal_year_start
+
+			opening_balance[key] = opening_amount
+			closing_balance[key] = opening_amount + change
+		else:
+			if i == 0:
+				opening_amount = get_opening_balance(filters.company, period_list, filters) or 0.0
+				running_total = opening_amount
+			opening_balance[key] = running_total
+			running_total += change
+			closing_balance[key] = running_total
 
 	opening_balance["total"] = opening_balance[period_list[0]["key"]]
 	closing_balance["total"] = closing_balance[period_list[-1]["key"]]
@@ -309,34 +350,14 @@ def show_opening_and_closing_balance(out, period_list, currency, net_change_in_c
 def get_opening_balance(company, period_list, filters):
 	from copy import deepcopy
 
-	cash_value = {}
-	account_types = get_cash_flow_accounts()
-	net_profit_loss = 0.0
-
 	local_filters = deepcopy(filters)
-	local_filters.start_date, local_filters.end_date = get_opening_range_using_fiscal_year(
-		company, period_list
-	)
+	local_filters.start_date = "1900-01-01"
+	local_filters.end_date = period_list[0]["from_date"] - timedelta(days=1)
+	local_filters.account_type = ["Bank", "Cash"]
 
-	for section in account_types:
-		section_name = section.get("section_name")
-		cash_value.setdefault(section_name, 0.0)
-
-		if section_name == "Operations":
-			net_profit_loss += get_net_income(company, period_list, local_filters)
-
-		for account in section.get("account_types", []):
-			account_type = account.get("account_type")
-			local_filters.account_type = account_type
-
-			amount = get_account_type_based_gl_data(company, local_filters) or 0.0
-
-			if "Depreciation" in account_type:
-				cash_value[section_name] += amount * -1
-			else:
-				cash_value[section_name] += amount
-
-	return sum(cash_value.values()) + net_profit_loss
+	# Opening cash is a balance-sheet amount; read it directly rather than
+	# reconstructing it from selected operating, investing, and financing rows.
+	return -(get_account_type_based_gl_data(company, local_filters) or 0.0)
 
 
 def get_net_income(company, period_list, filters):

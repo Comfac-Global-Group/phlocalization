@@ -86,7 +86,13 @@ def get_data(filters):
 				1 AS block_order, j.jo_number, 1 AS section_order,
 				s.tran_date, s.doc_no_field, s.doc_type, s.reference,
 				s.payee_received_from, s.particulars,
-				s.debit, s.credit, s.net_change, s.status_label AS status_label,
+				/* Cancelled: show original + reversal on both sides, so net = 0.00 */
+				CASE WHEN s.status_label = 'Cancelled'
+					 THEN COALESCE(s.debit, 0) + COALESCE(s.credit, 0) ELSE s.debit END AS debit,
+				CASE WHEN s.status_label = 'Cancelled'
+					 THEN COALESCE(s.debit, 0) + COALESCE(s.credit, 0) ELSE s.credit END AS credit,
+				CASE WHEN s.status_label = 'Cancelled' THEN 0 ELSE s.net_change END AS net_change,
+				s.status_label AS status_label,
 				s.creation, s.modified_by, s.modified, s.owner
 			FROM (
 				SELECT jo_number FROM (
@@ -318,7 +324,13 @@ def get_data(filters):
 			SELECT 1, j.jo_number, 5,
 				   c.tran_date, c.doc_no_field, c.doc_type, c.reference,
 				   c.payee_received_from, c.particulars,
-				   c.debit, c.credit, c.net_change, c.status_label,
+				   /* Cancelled: show original + reversal on both sides, so net = 0.00 */
+				   CASE WHEN c.status_label = 'Cancelled'
+						THEN COALESCE(c.debit, 0) + COALESCE(c.credit, 0) ELSE c.debit END,
+				   CASE WHEN c.status_label = 'Cancelled'
+						THEN COALESCE(c.debit, 0) + COALESCE(c.credit, 0) ELSE c.credit END,
+				   CASE WHEN c.status_label = 'Cancelled' THEN 0 ELSE c.net_change END,
+				   c.status_label,
 				   c.creation, c.modified_by, c.modified, c.owner
 			FROM (
 				SELECT jo_number FROM (

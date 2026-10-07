@@ -62,6 +62,12 @@ def get_data(filters):
 	The Status filter (All / Posted / Cancelled Transactions, default Posted)
 	is applied to in-period transaction queries only. Pre-period beginning-balance
 	subqueries stay posted-only so opening balances remain correct.
+
+	Sorting / running balance:
+	  The running totals (net_debit, net_credit, balance_debit, balance_credit)
+	  and the displayed row order (sort_order) are both driven by ONE ordering:
+	      department code -> posting_date -> voucher_no -> GL Entry name -> idx
+	  so the running balance can be traced line by line from top to bottom.
 	"""
 	sql = """
 WITH
@@ -250,8 +256,24 @@ FROM (
         NULL AS beginning_balance,
         g.debit AS debit,
         g.credit AS credit,
-        SUM(g.debit)  OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx) AS net_debit,
-        SUM(g.credit) OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx) AS net_credit,
+
+        /* ---- RUNNING TOTALS ----
+           Same ORDER BY as sort_order below, so the running balance follows
+           the displayed row sequence exactly. */
+        SUM(g.debit) OVER (
+            PARTITION BY g.account
+            ORDER BY COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+                     g.posting_date, g.voucher_no, g.name, g.idx
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS net_debit,
+        SUM(g.credit) OVER (
+            PARTITION BY g.account
+            ORDER BY COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+                     g.posting_date, g.voucher_no, g.name, g.idx
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS net_credit,
+
+        /* ---- RUNNING BALANCE ---- */
         CASE
             WHEN (
                 COALESCE((
@@ -263,8 +285,12 @@ FROM (
                       AND gle_bb.posting_date < %(from_date)s
                       AND gle_bb.account = g.account
                 ), 0)
-                + SUM(g.debit)  OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
-                - SUM(g.credit) OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
+                + SUM(g.debit - g.credit) OVER (
+                    PARTITION BY g.account
+                    ORDER BY COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+                             g.posting_date, g.voucher_no, g.name, g.idx
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                )
             ) > 0
             THEN (
                 COALESCE((
@@ -276,8 +302,12 @@ FROM (
                       AND gle_bb.posting_date < %(from_date)s
                       AND gle_bb.account = g.account
                 ), 0)
-                + SUM(g.debit)  OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
-                - SUM(g.credit) OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
+                + SUM(g.debit - g.credit) OVER (
+                    PARTITION BY g.account
+                    ORDER BY COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+                             g.posting_date, g.voucher_no, g.name, g.idx
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                )
             )
             ELSE 0
         END AS balance_debit,
@@ -292,8 +322,12 @@ FROM (
                       AND gle_bb.posting_date < %(from_date)s
                       AND gle_bb.account = g.account
                 ), 0)
-                + SUM(g.debit)  OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
-                - SUM(g.credit) OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
+                + SUM(g.debit - g.credit) OVER (
+                    PARTITION BY g.account
+                    ORDER BY COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+                             g.posting_date, g.voucher_no, g.name, g.idx
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                )
             ) < 0
             THEN ABS(
                 COALESCE((
@@ -305,8 +339,12 @@ FROM (
                       AND gle_bb.posting_date < %(from_date)s
                       AND gle_bb.account = g.account
                 ), 0)
-                + SUM(g.debit)  OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
-                - SUM(g.credit) OVER (PARTITION BY g.account ORDER BY g.posting_date, g.voucher_no, g.idx)
+                + SUM(g.debit - g.credit) OVER (
+                    PARTITION BY g.account
+                    ORDER BY COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+                             g.posting_date, g.voucher_no, g.name, g.idx
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                )
             )
             ELSE 0
         END AS balance_credit,
@@ -315,6 +353,10 @@ FROM (
         g.creation AS creation,
         g.modified_by AS modified_by,
         g.modified AS modified,
+
+        /* ---- SORT ORDER ----
+           Position within the account = ROW_NUMBER() over the SAME ordering
+           used by the running totals above. */
         CONCAT(
             g.account,
             '-2-',
@@ -322,7 +364,14 @@ FROM (
             '-',
             DATE_FORMAT(g.posting_date, '%%Y%%m%%d'),
             '-',
-            LPAD(g.idx, 5, '0')
+            LPAD(
+                ROW_NUMBER() OVER (
+                    PARTITION BY g.account
+                    ORDER BY COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+                             g.posting_date, g.voucher_no, g.name, g.idx
+                ),
+                7, '0'
+            )
         ) AS sort_order,
         COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2)) AS dept_code
     FROM `tabGL Entry` g
@@ -450,8 +499,8 @@ FROM (
         CONCAT(
             g.account,
             '-2-',
-            COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2)),
-            '-99999999-99999'
+            COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2), 'ZZ'),
+            '-99999999-9999999'
         ) AS sort_order,
         COALESCE(SUBSTRING_INDEX(g.cost_center, ' - ', 1), LEFT(g.remarks, 2)) AS dept_code
     FROM `tabGL Entry` g

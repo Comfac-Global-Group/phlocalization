@@ -39,6 +39,12 @@ frappe.query_reports["BIR Income Statement"] = {
 			fieldtype: "Link",
 			options: "Project",
 		},
+		{
+			fieldname: "include_closing_entries",
+			label: __("Include Period Closing Entries"),
+			fieldtype: "Check",
+			default: 0,
+		},
 	],
 
 	formatter: function (value, row, column, data, default_formatter) {

@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate, get_first_day, get_last_day, add_years
+from frappe.utils import flt, cint, getdate, get_first_day, get_last_day, add_years
 
 
 MONTHS = [
@@ -57,6 +57,8 @@ IS_WITH_COS_CALC_KEYS = [
 	"net_before_tax",
 	"net_profit",
 ]
+
+CLOSING_VOUCHER_TYPE = "Period Closing Voucher"
 
 
 def execute(filters=None):
@@ -538,11 +540,14 @@ def get_balance_by_cc(company, lft, rgt, cost_center, from_date, to_date, extra_
 
 def build_extra_conditions(filters):
 	"""Construct additional SQL WHERE clauses from optional filter fields.
-	Checks for cost_center and project filters and appends parameterised
-	conditions to the clause string, returning both the clause and its params dict.
+	Excludes Period Closing Voucher entries unless 'Include Period Closing
+	Entries' is checked; also applies cost_center and project filters.
 	"""
 	cond = ""
 	params = {}
+	if not cint(filters.get("include_closing_entries")):
+		cond += " AND gle.voucher_type != %(closing_voucher_type)s"
+		params["closing_voucher_type"] = CLOSING_VOUCHER_TYPE
 	if filters.get("cost_center"):
 		cond += " AND gle.cost_center = %(cost_center)s"
 		params["cost_center"] = filters["cost_center"]

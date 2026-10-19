@@ -42,7 +42,10 @@ function fetch_app_version(frm) {
 					   || r.message['bureau_of_internal_revenue'];
 
 				if (app) {
-					frm.set_value('software_name', app.title);
+					// Default only; keep a user-entered software name
+					if (!frm.doc.software_name) {
+						frm.set_value('software_name', app.title);
+					}
 					frm.set_value('version_number', app.version);
 				}
 			}
